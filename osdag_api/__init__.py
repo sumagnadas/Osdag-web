@@ -10,6 +10,7 @@ developed_modules = [
     "Beam-Beam-End-Plate-Connection",
     "Beam-to-Column-End-Plate-Connection",
     "Tension-Member-Bolted-Design",
+    "Tension-Member-Welded-Design",
     "Simply-Supported-Beam"
 ]
 
@@ -67,6 +68,12 @@ module_dict = [
         "image": "/static/images/modules/tension_member_bolted.png",
         "name": "Tension Member Bolted Design",
         "path": "Tension Member/tension_bolted"
+    },
+    {
+        "key": "Tension-Member-Welded-Design",
+        "image": "/static/images/modules/tension_member_welded.png",
+        "name": "Tension Member Welded Design",
+        "path": "Tension Member/tension_welded"
     },
     {
         "key": "Simply-Supported-Beam",
