@@ -93,8 +93,28 @@ class FlexureMemberViewSet(viewsets.ViewSet):
         
         Returns input options for the sub-module (e.g., section lists, materials)
         """
-        # TODO: Implement options endpoint if needed
-        return Response({'message': 'Options endpoint not yet implemented'}, status=501)
+        # Get service from registry
+        ServiceClass = FlexureMemberRegistry.get_service_by_slug(submodule_slug)
+        
+        if not ServiceClass:
+            return Response(
+                {'error': f'Sub-module {submodule_slug} not found'},
+                status=404
+            )
+        
+        try:
+            # Call service's get_options method if it exists
+            if hasattr(ServiceClass, 'get_options'):
+                options_data = ServiceClass.get_options(request)
+                return Response(options_data, status=200)
+            else:
+                # Fallback: return empty options
+                return Response({}, status=200)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=500
+            )
     
     @action(detail=False, methods=['post'], url_path='(?P<submodule_slug>[^/.]+)/cad')
     def cad(self, request, submodule_slug=None):

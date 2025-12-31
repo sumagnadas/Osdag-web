@@ -2,14 +2,19 @@
 
 ## Table of Contents
 1. [Overview](#overview)
-2. [Module Architecture](#module-architecture)
-3. [Optimization System](#optimization-system)
-4. [Real-Time Visualization](#real-time-visualization)
-5. [Design Checks](#design-checks)
-6. [File Structure](#file-structure)
-7. [Workflow Diagrams](#workflow-diagrams)
-8. [Key Algorithms](#key-algorithms)
-9. [Configuration](#configuration)
+2. [Design Types](#design-types)
+3. [Inputs](#inputs)
+   - [Phase 1: Normal/Manual Inputs](#phase-1-normalmanual-inputs)
+   - [Phase 2: Optimized Inputs](#phase-2-optimized-inputs)
+4. [Outputs](#outputs)
+5. [Module Architecture](#module-architecture)
+6. [Optimization System](#optimization-system)
+7. [Real-Time Visualization](#real-time-visualization)
+8. [Design Checks](#design-checks)
+9. [File Structure](#file-structure)
+10. [Workflow Diagrams](#workflow-diagrams)
+11. [Key Algorithms](#key-algorithms)
+12. [Configuration](#configuration)
 
 ---
 
@@ -17,31 +22,377 @@
 
 The Plate Girder module in Osdag is a comprehensive design and optimization system for welded plate girders according to IS 800:2007. It features:
 
-- **Optimized Design Type**: Uses Particle Swarm Optimization (PSO) to find optimal dimensions
-- **Real-Time Visualization**: Live 3D dashboard showing optimization progress
+- **Two Design Types**: Manual/Customized design and Optimized design using Particle Swarm Optimization (PSO)
+- **Real-Time Visualization**: Live 3D dashboard showing optimization progress (for optimized design)
 - **Comprehensive Design Checks**: Moment, shear, buckling, crippling, deflection, and weld checks
 - **Symmetric and Unsymmetric Sections**: Supports both symmetric and unsymmetric flange configurations
 - **Thick and Thin Web Designs**: Handles both thick web (without intermediate stiffeners) and thin web (with intermediate stiffeners) designs
 
-### Key Features
+---
 
-1. **PSO Optimization**: Two variants available:
-   - **Intelligent PSO**: Handles discrete variables (standard thicknesses) and smart boundary handling
-   - **Global Best PSO**: Traditional PSO with constraint handling
+## Design Types
 
-2. **Real-Time Dashboard**: Three-panel visualization:
-   - **Parallel Coordinates Plot**: Shows design variable convergence
-   - **Performance Map**: Weight vs Utilization Ratio scatter plot
-   - **Cross-Section Preview**: Real-time best section visualization
+The Plate Girder module supports two main design approaches:
 
-3. **Design Validation**: Comprehensive checks per IS 800:2007:
-   - Section classification (Plastic/Compact/Semi-Compact/Slender)
-   - Moment capacity
-   - Shear capacity
-   - Web buckling
-   - Web crippling
-   - Deflection serviceability
-   - Weld design
+### 1. Manual/Customized Design (`Customized`)
+
+**Description**: User manually specifies all geometric dimensions of the plate girder.
+
+**When to Use**:
+- When specific dimensions are required
+- When optimizing for non-weight objectives
+- When dimensions are constrained by fabrication or architectural requirements
+
+**Input Requirements**:
+- Total depth (D) - **Required**
+- Top flange width - **Required**
+- Bottom flange width - **Required**
+- Web thickness - **Required**
+- Top flange thickness - **Required**
+- Bottom flange thickness - **Required**
+- All other design preference parameters
+
+**Process**:
+1. User enters all geometric dimensions in Input Dock
+2. System performs design checks
+3. Results displayed with utilization ratios
+4. User can iterate by adjusting dimensions manually
+
+### 2. Optimized Design (`Optimized`)
+
+**Description**: System automatically finds optimal dimensions using Particle Swarm Optimization (PSO) to minimize weight while satisfying all design constraints.
+
+**When to Use**:
+- When weight optimization is the primary goal
+- When exploring design space for best solution
+- When multiple constraints need to be balanced
+
+**Input Requirements**:
+- Material selection - **Required**
+- Loading conditions (Moment, Shear) - **Required**
+- Optimization bounds (can be customized or use defaults)
+- Design preference parameters
+
+**Process**:
+1. User selects "Optimized" as design type
+2. System uses PSO to search for optimal dimensions
+3. Real-time visualization shows optimization progress
+4. Best solution automatically selected and displayed
+
+**Key Features**:
+- Intelligent PSO with discrete variable handling
+- Real-time 3-panel visualization dashboard
+- Automatic constraint satisfaction
+- Weight minimization objective
+
+---
+
+## Inputs
+
+### Phase 1: Normal/Manual Inputs
+
+These inputs are required for **both** Manual and Optimized design types.
+
+#### Input Dock Parameters
+
+**Location**: Main Input Dock (visible in main window)
+
+| Parameter | Key | Type | Required | Description | Units |
+|-----------|-----|------|----------|-------------|-------|
+| **Module** | `KEY_MODULE` | Text | Yes | Module identifier | - |
+| **Material** | `KEY_MATERIAL` | ComboBox | Yes | Steel material grade (e.g., E250, E350) | - |
+| **Design Type** | `KEY_OVERALL_DEPTH_PG_TYPE` | ComboBox | Yes | "Customized" or "Optimized" | - |
+| **Total Depth** | `KEY_OVERALL_DEPTH_PG` | TextBox | Conditional* | Total depth of girder | mm |
+| **Web Thickness** | `KEY_WEB_THICKNESS_PG` | ComboBox | Yes | Web plate thickness (standard values) | mm |
+| **Top Flange Width** | `KEY_TOP_Bflange_PG` | TextBox | Conditional* | Width of top flange | mm |
+| **Top Flange Thickness** | `KEY_TOP_FLANGE_THICKNESS_PG` | ComboBox | Yes | Top flange thickness (standard values) | mm |
+| **Bottom Flange Width** | `KEY_BOTTOM_Bflange_PG` | TextBox | Conditional* | Width of bottom flange | mm |
+| **Bottom Flange Thickness** | `KEY_BOTTOM_FLANGE_THICKNESS_PG` | ComboBox | Yes | Bottom flange thickness (standard values) | mm |
+| **Length** | `KEY_LENGTH` | TextBox | Yes | Span length of girder | m |
+| **Support Type** | `KEY_DESIGN_TYPE_FLEXURE` | ComboBox | Yes | "Major Laterally Supported" or "Major Laterally Unsupported" | - |
+| **Support Width** | `KEY_SUPPORT_WIDTH` | TextBox | Yes | Width of support | mm |
+| **Web Philosophy** | `KEY_WEB_PHILOSOPHY` | ComboBox | Yes | "Thick Web without ITS" or "Thin Web with ITS" | - |
+| **Torsional Restraint** | `KEY_TORSIONAL_RES` | ComboBox | Yes | Torsional restraint condition | - |
+| **Warping Restraint** | `KEY_WARPING_RES` | ComboBox | Yes | Warping restraint condition | - |
+| **Moment** | `KEY_MOMENT` | TextBox | Yes | Factored bending moment | kNm |
+| **Shear** | `KEY_SHEAR` | TextBox | Yes | Factored shear force | kN |
+| **Bending Moment Shape** | `KEY_BENDING_MOMENT_SHAPE` | ComboBox | Yes | Loading pattern (UDL/Point load, Pin-Pin/Fix-Fix) | - |
+
+*Conditional: Required only for "Customized" design type. Not required for "Optimized" design type.
+
+**Standard Thickness Values** (`VALUES_PLATETHK`):
+- Available options: 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40 mm
+- Can be customized in Design Preferences
+
+**Support Type Options** (`VALUES_SUPP_TYPE_temp`):
+- "Major Laterally Supported"
+- "Major Laterally Unsupported"
+
+**Web Philosophy Options** (`WEB_PHILOSOPHY_list`):
+- "Thick Web without ITS" (Intermediate Transverse Stiffeners)
+- "Thin Web with ITS"
+
+**Bending Moment Shape Options** (`Bending_moment_shape_list`):
+- "Uniform Loading with pinned-pinned support" (`KEY_DISP_UDL_PIN_PIN_PG`)
+- "Uniform Loading with fixed-fixed support" (`KEY_DISP_UDL_FIX_FIX_PG`)
+- "Concentrate Load with pinned-pinned support" (`KEY_DISP_PL_PIN_PIN_PG`)
+- "Concentrate load with fixed-fixed support" (`KEY_DISP_PL_FIX_FIX_PG`)
+
+#### Design Preferences Parameters
+
+**Location**: Design Preferences Dialog (accessible via Design Preferences button)
+
+##### Tab 1: Girder Properties (`KEY_DISP_GIRDERSEC`)
+
+| Parameter | Key | Type | Default | Description |
+|-----------|-----|------|---------|-------------|
+| **Material** | `KEY_SEC_MATERIAL` | ComboBox | From Input Dock | Material grade (auto-synced from Input Dock) |
+| **Ultimate Strength (fu)** | `KEY_SEC_FU` | TextBox | Auto-calculated | Ultimate tensile strength | MPa |
+| **Yield Strength (fy)** | `KEY_SEC_FY` | TextBox | Auto-calculated | Yield strength | MPa |
+
+##### Tab 2: Optimisation
+
+| Parameter | Key | Type | Default | Description |
+|-----------|-----|------|---------|-------------|
+| **Effective Area Parameter** | `KEY_EFFECTIVE_AREA_PARA` | TextBox | 1.0 | Effective area factor for compression |
+| **Length Overwrite** | `KEY_LENGTH_OVERWRITE` | TextBox | 'NA' | Override length for specific checks | m |
+| **Allow Class** | `KEY_ALLOW_CLASS` | ComboBox | 'Yes' | Allow Semi-Compact/Slender sections | Yes/No |
+| **Load** | `KEY_LOAD` | ComboBox | 'Normal' | Loading condition type | Normal/Crane Load(Manual)/etc. |
+
+**Load Options** (`KEY_DISP_LOAD_list`):
+- 'Normal'
+- 'Crane Load(Manual operation)'
+- 'Crane load(Electric operation up to 50t)'
+- 'Crane load(Electric operation over 50t)'
+
+##### Tab 3: Stiffeners
+
+| Parameter | Key | Type | Default | Description |
+|-----------|-----|------|---------|-------------|
+| **Intermediate Stiffener** | `KEY_IntermediateStiffener` | ComboBox | 'No' | Use intermediate transverse stiffeners | Yes/No |
+| **Intermediate Stiffener Spacing** | `KEY_IntermediateStiffener_spacing` | TextBox | 'NA' | Spacing between intermediate stiffeners | mm |
+| **Intermediate Stiffener Thickness** | `KEY_IntermediateStiffener_thickness` | ComboBox | 'All' | Thickness selection mode | All/Customized |
+| **Intermediate Stiffener Thickness Values** | `KEY_IntermediateStiffener_thickness_val` | ComboBox | All standard | Selected thickness values | mm |
+| **Longitudinal Stiffener** | `KEY_LongitudnalStiffener` | ComboBox | 'Yes and 1 stiffener' | Longitudinal stiffener configuration | No/Yes and 1/Yes and 2 |
+| **Longitudinal Stiffener Thickness** | `KEY_LongitudnalStiffener_thickness` | ComboBox | 'All' | Thickness selection mode | All/Customized |
+| **Longitudinal Stiffener Thickness Values** | `KEY_LongitudnalStiffener_thickness_val` | ComboBox | All standard | Selected thickness values | mm |
+| **Shear Buckling Option** | `KEY_ShearBucklingOption` | ComboBox | First option | Shear buckling analysis method | Simple Post Critical/Tension Field |
+
+**Standard Stiffener Thickness Values** (`VALUES_STIFFENER_THICKNESS`):
+- 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40 mm
+
+##### Tab 4: Additional Girder Data
+
+| Parameter | Key | Type | Default | Description |
+|-----------|-----|------|---------|-------------|
+| **Symmetry** | `KEY_IS_IT_SYMMETRIC` | ComboBox | 'Symmetrical' | Section symmetry type | Symmetrical/Unsymmetrical |
+
+**Symmetry Options** (`KEY_DISP_SYMMETRIC_list`):
+- 'Symmetrical' (`KEY_DISP_SYM`): Top and bottom flanges are identical
+- 'Unsymmetrical' (`KEY_DISP_UNSYM`): Top and bottom flanges can differ
+
+##### Tab 5: Design
+
+| Parameter | Key | Type | Default | Description |
+|-----------|-----|------|---------|-------------|
+| **Design Method** | `KEY_DP_DESIGN_METHOD` | ComboBox | 'Limit State Design' | Design methodology | Limit State Design |
+
+##### Tab 6: Deflection
+
+| Parameter | Key | Type | Default | Description |
+|-----------|-----|------|---------|-------------|
+| **Structure Type** | `KEY_STR_TYPE` | ComboBox | 'Highway Bridge' | Type of structure | Highway Bridge/Industrial/etc. |
+| **Design Load** | `KEY_DESIGN_LOAD` | ComboBox | 'Live Load' | Load type for deflection | Live Load/Dead Load/etc. |
+| **Member Options** | `KEY_MEMBER_OPTIONS` | ComboBox | 'Simple Span' | Member configuration | Simple Span/Cantilever/etc. |
+| **Supporting Options** | `KEY_SUPPORTING_OPTIONS` | ComboBox | 'NA' | Supporting element type | Varies by structure type |
+| **Maximum Deflection** | `KEY_MAX_DEFL` | TextBox/ComboBox | 600 | Deflection limit | mm or Span/ratio |
+
+**Structure Type Options** (`KEY_STR_TYPE`):
+- 'Highway Bridge'
+- 'Industrial Building'
+- 'Other'
+
+**Design Load Options** (`VALUE_DESIGN_LOAD_list`):
+- 'Live load'
+- 'Dead load'
+- 'Crane Load(Manual operation)'
+- 'Crane load(Electric operation up to 50t)'
+- 'Crane load(Electric operation over 50t)'
+
+**Member Options** (`VALUES_MEMBER_OPTIONS`):
+- Varies by structure type
+- Examples: 'Simple Span', 'Cantilever Span', 'Purlin and Girts', etc.
+
+**Maximum Deflection Options** (`VALUES_MAX_DEFL`):
+- 'Span/600', 'Span/800', 'Span/400', 'Span/300', 'Span/360', 'Span/150', 'Span/180', 'Span/240', 'Span/120', 'Span/500', 'Span/750', 'Span/1000'
+- Or custom value in mm
+
+### Phase 2: Optimized Inputs
+
+These inputs are **only required/applicable** when Design Type is set to "Optimized".
+
+#### Optimization Bounds
+
+**Location**: Design Preferences → Optimisation Tab → Customize buttons
+
+When "Optimized" design type is selected, users can customize the search space bounds for optimization variables. If not customized, default bounds are used.
+
+##### Default Bounds
+
+| Variable | Symbol | Lower Bound | Upper Bound | Step Size | Discrete Values |
+|----------|--------|-------------|-------------|-----------|-----------------|
+| **Total Depth** | `D` | 200 mm | 2000 mm | 25 mm | - |
+| **Web Thickness** | `tw` | 6 mm | 40 mm | - | Standard thicknesses |
+| **Flange Width** (Symmetric) | `bf` | 100 mm | 1000 mm | 10 mm | - |
+| **Top Flange Width** (Unsymmetric) | `bf_top` | 100 mm | 1000 mm | 10 mm | - |
+| **Bottom Flange Width** (Unsymmetric) | `bf_bot` | 100 mm | 1000 mm | 10 mm | - |
+| **Flange Thickness** (Symmetric) | `tf` | 6 mm | 100 mm | - | Standard thicknesses |
+| **Top Flange Thickness** (Unsymmetric) | `tf_top` | 6 mm | 100 mm | - | Standard thicknesses |
+| **Bottom Flange Thickness** (Unsymmetric) | `tf_bot` | 6 mm | 100 mm | - | Standard thicknesses |
+| **Stiffener Spacing** (Thin Web) | `c` | 75 mm | 3000 mm | 25 mm | - |
+| **Stiffener Thickness** (Thin Web) | `t_stiff` | 6 mm | 40 mm | - | Standard thicknesses |
+
+**Standard Thickness Values** (for discrete variables):
+- Web thickness: 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40 mm
+- Flange thickness: 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 mm
+
+##### Customizing Bounds
+
+Users can customize bounds for any optimization variable:
+
+1. Navigate to Design Preferences → Optimisation Tab
+2. Click "Customize" button next to the variable
+3. Enter:
+   - **Lower Bound**: Minimum value
+   - **Upper Bound**: Maximum value
+   - **Step Size**: Increment for continuous variables (optional)
+4. Click "Add" to save
+
+**Note**: For discrete variables (thicknesses), the system will snap to nearest standard value during optimization.
+
+#### Optimization Parameters
+
+**Location**: Code configuration (not directly user-configurable in current version)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| **PSO Type** | Intelligent PSO (default) | Optimization algorithm variant |
+| **Number of Particles** | 50 | Swarm size |
+| **Number of Iterations** | 100 | Maximum iterations |
+| **Inertia Weight (w)** | 0.4 | PSO inertia parameter |
+| **Cognitive Coefficient (c1)** | 1.5 | Personal best influence |
+| **Social Coefficient (c2)** | 1.5 | Global best influence |
+| **Penalty Coefficient** | 1,000,000 | Constraint violation penalty multiplier |
+
+#### Optimization Variables Structure
+
+The variables optimized depend on section configuration:
+
+**Symmetric Section (Thick Web)**:
+- `D`: Total depth
+- `tw`: Web thickness
+- `bf`: Flange width (same for top and bottom)
+- `tf`: Flange thickness (same for top and bottom)
+
+**Symmetric Section (Thin Web)**:
+- `D`: Total depth
+- `tw`: Web thickness
+- `bf`: Flange width
+- `tf`: Flange thickness
+- `c`: Intermediate stiffener spacing
+- `t_stiff`: Intermediate stiffener thickness
+
+**Unsymmetric Section (Thick Web)**:
+- `D`: Total depth
+- `tw`: Web thickness
+- `bf_top`: Top flange width
+- `bf_bot`: Bottom flange width
+- `tf_top`: Top flange thickness
+- `tf_bot`: Bottom flange thickness
+
+**Unsymmetric Section (Thin Web)**:
+- `D`: Total depth
+- `tw`: Web thickness
+- `bf_top`: Top flange width
+- `bf_bot`: Bottom flange width
+- `tf_top`: Top flange thickness
+- `tf_bot`: Bottom flange thickness
+- `c`: Intermediate stiffener spacing
+- `t_stiff`: Intermediate stiffener thickness
+
+---
+
+## Outputs
+
+The Plate Girder module provides comprehensive output results after design completion.
+
+### Output Dock Parameters
+
+**Location**: Output Dock (visible in main window after design)
+
+| Output Parameter | Key | Description | Units |
+|------------------|-----|-------------|-------|
+| **Optimum Designation** | `KEY_TITLE_OPTIMUM_DESIGNATION` | Section designation/identifier | - |
+| **Utilization Ratio** | `KEY_OPTIMUM_UR_COMPRESSION` | Maximum utilization ratio (moment/shear/deflection) | - |
+| **Section Classification** | `KEY_OPTIMUM_SC` | Section class (Plastic/Compact/Semi-Compact/Slender) | - |
+| **Beta_b Constant** | `KEY_betab_constatnt` | Beta_b value for lateral-torsional buckling | - |
+| **Effective Section Area** | `KEY_EFF_SEC_AREA` | Effective area for compression | mm² |
+| **Web Thickness** | `KEY_WEB_THICKNESS_PG` | Provided web thickness | mm |
+| **Top Flange Thickness** | `KEY_TOP_FLANGE_THICKNESS_PG` | Provided top flange thickness | mm |
+| **Bottom Flange Thickness** | `KEY_BOTTOM_FLANGE_THICKNESS_PG` | Provided bottom flange thickness | mm |
+| **Intermediate Stiffener Thickness** | `KEY_IntermediateStiffener_thickness` | Intermediate stiffener thickness | mm |
+| **Intermediate Stiffener Spacing** | `KEY_IntermediateStiffener_spacing` | Spacing between intermediate stiffeners | mm |
+| **Longitudinal Stiffener Thickness** | `KEY_LongitudnalStiffener_thickness` | Longitudinal stiffener thickness | mm |
+| **Longitudinal Stiffener Numbers** | `KEY_LongitudnalStiffener_numbers` | Number of longitudinal stiffeners | - |
+| **End Panel Stiffener Thickness** | `KEY_EndpanelStiffener_thickness` | End panel stiffener thickness | mm |
+| **Design Bending Strength** | `KEY_MOMENT_STRENGTH` | Design moment capacity | kNm |
+| **Weld for Web to Flange** | `KEY_WeldWebtoflange` | Fillet weld size for web-flange connection | mm |
+| **Weld for Stiffener to Web** | `KEY_WeldStiffenertoweb` | Fillet weld size for stiffener-web connection | mm |
+| **T Constant** | `KEY_T_constatnt` | Torsional constant (for LTB) | mm⁴ |
+| **W Constant** | `KEY_W_constatnt` | Warping constant (for LTB) | mm⁶ |
+| **Longitudinal Stiffener 1 Position** | `KEY_LongitudinalStiffener1_pos` | Position of first longitudinal stiffener | mm |
+| **Longitudinal Stiffener 2 Position** | `KEY_LongitudinalStiffener2_pos` | Position of second longitudinal stiffener | mm |
+| **Elastic Critical Moment** | `KEY_Elastic_CM` | Elastic critical moment for LTB | kNm |
+| **Calculated Deflection** | `KEY_MAX_DEFL` | Maximum deflection under service loads | mm |
+| **Deflection Limit** | `DeflectionLimit` | Allowable deflection limit | mm |
+
+### Design Status
+
+The module provides a boolean `design_status` flag indicating:
+- **True**: All design checks passed
+- **False**: One or more design checks failed
+
+### Utilization Ratios
+
+The module calculates and reports utilization ratios for:
+- **Moment Ratio**: Applied Moment / Design Moment Capacity
+- **Shear Ratio**: Applied Shear / Design Shear Capacity
+- **Deflection Ratio**: Calculated Deflection / Allowable Deflection
+
+The **maximum utilization ratio** is reported as the overall design efficiency metric.
+
+### Section Properties (Internal)
+
+The module calculates and uses (but may not display) the following section properties:
+- Area (A)
+- Moment of Inertia about X-axis (Ixx)
+- Moment of Inertia about Y-axis (Iyy)
+- Plastic Modulus (Zp)
+- Elastic Modulus (Ze)
+- Radius of Gyration (r)
+- Centroid position (for unsymmetric sections)
+- yj value (for unsymmetric sections, per IS 800:2007 E.3.2.2)
+
+### Design Check Results (Internal)
+
+The module performs and stores results for:
+- **Section Classification**: Plastic/Compact/Semi-Compact/Slender
+- **Moment Capacity Check**: Pass/Fail with ratio
+- **Shear Capacity Check**: Pass/Fail with ratio
+- **Web Buckling Check**: Pass/Fail
+- **Web Crippling Check**: Pass/Fail
+- **Deflection Check**: Pass/Fail with ratio
+- **Weld Design**: Weld sizes and capacities
 
 ---
 

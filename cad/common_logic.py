@@ -1,2485 +1,3171 @@
-'''
-Created on 18-Nov-2016
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# @author: Amir, Umair, Arsil
 
-@author: deepa,
-modified : Sourabh Das, Darshan Vishwakarma
-'''
+# FIXME: Keeping os even if not used here.
+import os
+import operator
+import math
+import logging
+from importlib.resources import files
+from pathlib import Path
+import platform
 
-# from utils.common.component import Bolt,Beam,Section,Angle,Plate,Nut,Column,Weld
-from cad.items.notch import Notch
-from cad.items.bolt import Bolt
-from cad.items.nut import Nut
-from cad.items.plate import Plate
-from cad.items.washer import Washer
-from cad.items.ISection import ISection
-from cad.items.filletweld import FilletWeld
-from cad.items.groove_weld import GrooveWeld
-from cad.items.angle import Angle
-from cad.items.anchor_bolt import AnchorBolt_A, AnchorBolt_B, AnchorBolt_Endplate
-from cad.items.stiffener_plate import StiffenerPlate
-from cad.items.grout import Grout
-from cad.items.angle import Angle
-from cad.items.channel import Channel
-from cad.items.Gasset_plate import GassetPlate
-from cad.items.stiffener_flange import Stiffener_flange
-from cad.items.rect_hollow import RectHollow
-from cad.items.circular_hollow import CircularHollow
+PATH_TO_DATABASE = files("osdag_core.data.ResourceFiles.Database").joinpath("Intg_osdag.sqlite")
 
-from cad.ShearConnections.FinPlate.beamWebBeamWebConnectivity import BeamWebBeamWeb as FinBeamWebBeamWeb
-from cad.ShearConnections.FinPlate.colFlangeBeamWebConnectivity import ColFlangeBeamWeb as FinColFlangeBeamWeb
-from cad.ShearConnections.FinPlate.colWebBeamWebConnectivity import ColWebBeamWeb as FinColWebBeamWeb
-from cad.ShearConnections.FinPlate.nutBoltPlacement import NutBoltArray as finNutBoltArray
+# Cross-platform pdflatex configuration
+if platform.system() == "Windows":
+    PDFLATEX = files("osdag_core.data.ResourceFiles.osdag-latex-env.bin.windows").joinpath("pdflatex.exe")
+else:
+    # On Linux/macOS, use system pdflatex (must be installed via texlive)
+    PDFLATEX = "pdflatex"
 
-from cad.ShearConnections.CleatAngle.beamWebBeamWebConnectivity import BeamWebBeamWeb as cleatBeamWebBeamWeb
-from cad.ShearConnections.CleatAngle.colFlangeBeamWebConnectivity import ColFlangeBeamWeb as cleatColFlangeBeamWeb
-from cad.ShearConnections.CleatAngle.colWebBeamWebConnectivity import ColWebBeamWeb as cleatColWebBeamWeb
-from cad.ShearConnections.CleatAngle.nutBoltPlacement import NutBoltArray as cleatNutBoltArray
 
-from cad.ShearConnections.EndPlate.beamWebBeamWebConnectivity import BeamWebBeamWeb as EndBeamWebBeamWeb
-from cad.ShearConnections.EndPlate.colFlangeBeamWebConnectivity import ColFlangeBeamWeb as EndColFlangeBeamWeb
-from cad.ShearConnections.EndPlate.colWebBeamWebConnectivity import ColWebBeamWeb as EndColWebBeamWeb
-from cad.ShearConnections.EndPlate.nutBoltPlacement import NutBoltArray as endNutBoltArray
+import sqlite3
 
-from cad.ShearConnections.SeatedAngle.CAD_col_web_beam_web_connectivity import ColWebBeamWeb as seatColWebBeamWeb
-from cad.ShearConnections.SeatedAngle.CAD_col_flange_beam_web_connectivity import ColFlangeBeamWeb as seatColFlangeBeamWeb
-from cad.ShearConnections.SeatedAngle.CAD_nut_bolt_placement import NutBoltArray as seatNutBoltArray
-# from cad.ShearConnections.SeatedAngle.seat_angle_calc import SeatAngleCalculation
+from .utils.common.other_standards import *
 
-from cad.BBCad.nutBoltPlacement_AF import NutBoltArray_AF
-from cad.BBCad.nutBoltPlacement_BF import NutBoltArray_BF
-from cad.BBCad.nutBoltPlacement_Web import NutBoltArray_Web
-from cad.BBCad.BBCoverPlateBoltedCAD import BBCoverPlateBoltedCAD
+# This returns the documents directory path for the current user
+def get_documents_folder():
+    system = platform.system()
+    
+    if system == "Windows":
+        # Windows: typically C:\Users\Username\Documents
+        docs_path = Path.home() / "Documents"
+    elif system == "Darwin":  # macOS
+        # macOS: typically /Users/Username/Documents
+        docs_path = Path.home() / "Documents"
+    elif system == "Linux":
+        # Linux: typically /home/username/Documents
+        # Also check XDG_DOCUMENTS_DIR for custom locations
+        xdg_docs = os.environ.get("XDG_DOCUMENTS_DIR")
+        if xdg_docs:
+            docs_path = Path(xdg_docs)
+        else:
+            docs_path = Path.home() / "Documents"
+    else:
+        # Fallback to home directory for unknown systems
+        docs_path = Path.home()
+    
+    # Ensure the directory exists, otherwise fall back to home
+    if not docs_path.exists():
+        docs_path = Path.home()
+    return str(docs_path)
 
-from cad.MomentConnections.BBSpliceCoverlateCAD.WeldedCAD import BBSpliceCoverPlateWeldedCAD
-from cad.MomentConnections.BBEndplate.BBEndplate_cadFile import CADFillet
-from cad.MomentConnections.BBEndplate.BBEndplate_cadFile import CADGroove
-from cad.MomentConnections.BCEndplate.BCEndplate_cadfile import CADGroove as BCECADGroove
-from cad.MomentConnections.BCEndplate.BCEndplate_cadfile import CADcolwebGroove
+class OurLog(logging.Handler):
 
-from cad.MomentConnections.CCSpliceCoverPlateCAD.WeldedCAD import CCSpliceCoverPlateWeldedCAD
-from cad.MomentConnections.CCSpliceCoverPlateCAD.BoltedCAD import CCSpliceCoverPlateBoltedCAD
-from cad.MomentConnections.CCSpliceCoverPlateCAD.nutBoltPlacement_AF import NutBoltArray_AF as CCSpliceNutBolt_AF
-from cad.MomentConnections.CCSpliceCoverPlateCAD.nutBoltPlacement_BF import NutBoltArray_BF as CCSpliceNutBolt_BF
-from cad.MomentConnections.CCSpliceCoverPlateCAD.nutBoltPlacement_Web import NutBoltArray_Web as CCSpliceNutBolt_Web
+    def __init__(self, key):
+        logging.Handler.__init__(self)
 
-from cad.BasePlateCad.baseplateconnection import BasePlateCad, HollowBasePlateCad
-from cad.BasePlateCad.nutBoltPlacement import NutBoltArray as bpNutBoltArray
+        self.key = key
+        # self.key.setText("<h1>Welcome to Osdag</h1>")
 
-from cad.Tension.WeldedCAD import TensionAngleWeldCAD, TensionChannelWeldCAD
-from cad.Tension.BoltedCAD import TensionAngleBoltCAD, TensionChannelBoltCAD
-from cad.Tension.nutBoltPlacement import NutBoltArray as TNutBoltArray
-from cad.Tension.intermittentConnections import IntermittentNutBoltPlateArray, IntermittentWelds
+    def handle(self, record):
+        msg = self.format(record)
+        if record.levelname == 'WARNING':
+            msg = "<span style='color: blue;'>"+ msg +"</span>"
+        elif record.levelname == 'ERROR':
+            msg = "<span style='color: red;'>"+ msg +"</span>"
+        elif record.levelname == 'INFO':
+            msg = "<span style='color: green;'>" + msg + "</span>"
+        # Safety check: ensure QTextEdit is not deleted before appending
+        try:
+            if self.key is not None:
+                self.key.append(msg)
+        except RuntimeError:
+            # QTextEdit C++ object has been deleted - skip appending
+            pass
 
-from cad.MomentConnections.CCEndPlateCAD.CAD import CCEndPlateCAD
-from cad.MomentConnections.CCEndPlateCAD.nutBoltPlacement import NutBoltArray as CEPNutBoltArray
 
-# from design_type.connection.fin_plate_connection import FinPlateConnection
-# from design_type.connection.cleat_angle_connection import CleatAngleConnection
-from design_type.connection.beam_cover_plate import BeamCoverPlate
-# from design_type.connection.base_plate_connection import BasePlateConnection
-from utilities import osdag_display_shape, DisplayMsg
-from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Fuse
-import copy
 
-from cad.BBCad.nutBoltPlacement_AF import NutBoltArray_AF
-from cad.BBCad.nutBoltPlacement_BF import NutBoltArray_BF
-from cad.BBCad.nutBoltPlacement_Web import NutBoltArray_Web
-from cad.BBCad.BBCoverPlateBoltedCAD import BBCoverPlateBoltedCAD
-from cad.MomentConnections.BBEndplate.BBE_nutBoltPlacement import BBENutBoltArray
-from cad.MomentConnections.BCEndplate.BCE_nutBoltPlacement import BCE_NutBoltArray
-from Common import *
-from math import *
+def connectdb1():
+    """
+    Function to fetch diameter values from Bolt Table
+     """
+    # @author: Amir
 
-# from Connections.Shear.Finplate.colWebBeamWebConnectivity import ColWebBeamWeb as finColWebBeamWeb
-# from Connections.Shear.Endplate.colWebBeamWebConnectivity import ColWebBeamWeb as endColWebBeamWeb
-# from Connections.Shear.cleatAngle.colWebBeamWebConnectivity import ColWebBeamWeb as cleatColWebBeamWeb
-# from Connections.Shear.SeatedAngle.CAD_col_web_beam_web_connectivity import ColWebBeamWeb as seatColWebBeamWeb
+    lst = []
+    conn = sqlite3.connect(PATH_TO_DATABASE)
+    cursor = conn.execute("SELECT Bolt_diameter FROM Bolt")
+    rows = cursor.fetchall()
+    for row in rows:
+        lst.append(row)
+    l2 = tuple_to_str_popup(lst)
+    return l2
+
+def connectdb2():
+    """
+    Function to fetch diameter values from Bolt Table
+     """
+    # @author: Amir
+
+    lst = []
+    conn = sqlite3.connect(PATH_TO_DATABASE)
+    cursor = conn.execute("SELECT Diameter FROM Anchor_Bolt")
+    rows = cursor.fetchall()
+    for row in rows:
+        lst.append(row)
+    l2 = tuple_to_str_popup(lst)
+    return l2
+
+
+def connectdb(table_name, call_type="dropdown"):
+
+    """
+        Function to fetch designation values from respective Tables.
+         """
+
+    # @author: Amir
+    conn = sqlite3.connect(PATH_TO_DATABASE)
+    lst = []
+    if table_name == "Angles":
+        cursor = conn.execute("SELECT Designation FROM Angles")
+
+    elif table_name == "Channels":
+        cursor = conn.execute("SELECT Designation FROM Channels")
+
+    elif table_name == "Beams":
+        cursor = conn.execute("SELECT Designation FROM Beams")
+
+    elif table_name == "Bolt":
+        cursor = conn.execute("SELECT Bolt_diameter FROM Bolt")
+
+    elif table_name == "Material":
+        cursor = conn.execute("SELECT Grade FROM Material")
+
+    elif table_name == "RHS":
+        cursor = conn.execute("SELECT Designation FROM RHS")
+
+    elif table_name == "SHS":
+        cursor = conn.execute("SELECT Designation FROM SHS")
+
+    elif table_name == "CHS":
+        cursor = conn.execute("SELECT Designation FROM CHS")
+
+    else:
+        cursor = conn.execute("SELECT Designation FROM Columns")
+    rows = cursor.fetchall()
+
+    for row in rows:
+        lst.append(row)
+
+    final_lst = tuple_to_str(lst,call_type,table_name)
+    if table_name == "Material" and call_type == "dropdown":
+        final_lst.append("Custom")
+
+    return final_lst
+
+
+def connect_for_red(table_name):
+
+    """
+        Function to fetch designation values from various Tables where source is IS808_Old
+    """
+
+    # @author: Arsil
+    conn = sqlite3.connect(PATH_TO_DATABASE)
+    lst = []
+    if table_name == "Angles":
+        cursor = conn.execute("SELECT Designation FROM Angles WHERE Source = 'IS808_Old'")
+
+    elif table_name == "Channels":
+        cursor = conn.execute("SELECT Designation FROM Channels WHERE Source = 'IS808_Old'")
+
+    elif table_name == "Beams":
+        cursor = conn.execute("SELECT Designation FROM Beams WHERE Source = 'IS808_Old'")
+
+    elif table_name == "Columns":
+        cursor = conn.execute("SELECT Designation FROM Columns WHERE Source = 'IS808_Old'")
+
+    else:
+        return []
+    rows = cursor.fetchall()
+
+    for row in rows:
+        lst.append(row)
+
+    final_lst = tuple_to_str_red(lst)
+    return final_lst
+
+
+def red_list_function():
+
+    """
+        Function to form a list for old values from Columns and Beams table.
+     """
+
+    # @author: Arsil
+
+    red_list = []
+    red_list_columns = connect_for_red("Columns")
+    red_list_beams = connect_for_red("Beams")
+    red_list.extend(red_list_beams)
+    red_list.extend(red_list_columns)
+    return red_list
+
+
+def tuple_to_str_popup(tl):
+
+    # @author: Amir
+
+    arr = []
+    for v in tl:
+        val = ''.join(v)
+        arr.append(val)
+    return arr
+
+def tuple_to_str(tl, call_type,table_name=None):
+
+    if call_type == "dropdown" and table_name != 'Material' and table_name != 'Bolt':
+        arr = ['Select Section']
+    else:
+        arr = []
+    for v in tl:
+        val = ''.join(v)
+        arr.append(val)
+    return arr
+
+
+def tuple_to_str_red(tl):
+    arr = []
+    for v in tl:
+        val = ''.join(v)
+        arr.append(val)
+    return arr
+
+def get_db_header(table_name):
+
+    conn = sqlite3.connect(PATH_TO_DATABASE)
+
+    if table_name == "Angles":
+        cursor = conn.execute("SELECT * FROM Angles")
+
+    elif table_name == "Channels":
+        cursor = conn.execute("SELECT * FROM Channels")
+
+    elif table_name == "Beams":
+        cursor = conn.execute("SELECT * FROM Beams")
+
+    else:
+        cursor = conn.execute("SELECT * FROM Columns")
+
+    header = [description[0] for description in cursor.description]
+
+    return header
+
+def get_source(table_name, designation):
+
+    conn = sqlite3.connect(PATH_TO_DATABASE)
+
+    if table_name == "Angles":
+        cursor = conn.execute("SELECT Source FROM Angles WHERE Designation = ?", (designation,))
+
+    elif table_name == "Channels":
+        cursor = conn.execute("SELECT Source FROM Channels WHERE Designation = ?", (designation,))
+
+    elif table_name == "Beams":
+        cursor = conn.execute("SELECT Source FROM Beams WHERE Designation = ?", (designation,))
+
+    else:
+        cursor = conn.execute("SELECT Source FROM Columns WHERE Designation = ?", (designation,))
+
+    source = cursor.fetchone()[0]
+    return str(source)
+
+
+class MaterialValidator(object):
+    def __init__(self, material):
+        self.material = str(material)
+        self.typ = "Unknown"
+        self.fy_20 = 0
+        self.fy_20_40 = 0
+        self.fy_40 = 0
+        self.fu = 0
+        self.custom_format_flag = False
+        self.invalid_value = ""
+        self.notations = ["Fy_20", "Fy_20_40", "Fy_40", "Fu"]
+        material = self.material.split("_")
+        if len(material) == 5:
+            self.typ = material[0]
+            self.fy_20 = material[1]
+            self.fy_20_40 = material[2]
+            self.fy_40 = material[3]
+            self.fu = material[4]
+        self.values = [self.fy_20, self.fy_20_40, self.fy_40, self.fu]
+        if self.typ == "Cus":
+            for i in self.values:
+                if str(i) != "" and str(i).isdigit():
+                    self.custom_format_flag = True
+                else:
+                    self.custom_format_flag = False
+                    break
+
+    def is_already_in_db(self):
+        if self.material in connectdb("Material", call_type="popup"):
+            return True
+        else:
+            return False
+
+    def is_format_custom(self):
+        return self.custom_format_flag
+
+    def is_valid_custom(self):
+
+        min_allowed = [165, 165, 165, 165]
+        max_allowed = [1500, 1500, 1500, 1500]
+        for i in range(4):
+            if self.values[i] == "":
+                continue
+            if min_allowed[i] <= int(self.values[i]) <= max_allowed[i]:
+                pass
+            else:
+                self.invalid_value = self.notations[i]
+                break
+
+        if self.invalid_value:
+            return False
+        else:
+            return self.custom_format_flag
+
+##########################
+# Type Keys (Type of input field, tab type etc.)
+###########################
+TYPE_COMBOBOX = 'ComboBox'
+TYPE_COMBOBOX_FREEZE = 'Disable_ComboBoc'
+TYPE_TABLE_IN = 'Table_Input'
+TYPE_TABLE_OU = 'Table_Output'
+TYPE_TABLE_GUS = 'Gusset_Table'
+TYPE_TEXTBOX = 'TextBox'
+TYPE_TITLE = 'Title'
+TYPE_LABEL = 'Label'
+TYPE_IMAGE = 'Image'
+TYPE_IMAGE_BIGGER = 'Image_Bigger'
+TYPE_IMAGE_COMPRESSION = 'Image_compression'
+TYPE_COMBOBOX_CUSTOMIZED = 'ComboBox_Customized'
+TYPE_IN_BUTTON = 'Input_dock_Button'
+TYPE_OUT_BUTTON = 'Output_dock_Button'
+TYPE_OUT_DOCK = 'Output_dock_Item'
+TYPE_OUT_LABEL = 'Output_dock_Label'
+TYPE_BREAK = 'Break'
+TYPE_ENTER = 'Enter'
+TYPE_TEXT_BROWSER = 'TextBrowser'
+TYPE_NOTE = 'Note'
+TYPE_WARNING = 'Warning'
+DESIGN_FLAG = 'False'
+VALUE_NOT_APPLICABLE = 'N/A'
+TYPE_TAB_1 = "TYPE_TAB_1"
+TYPE_TAB_2 = "TYPE_TAB_2"
+TYPE_TAB_3 = "TYPE_TAB_3"
+TYPE_SECTION = 'Popup_Section'
+TYPE_CUSTOM_MATERIAL = 'New_Material_Popup'
+TYPE_CUSTOM_SECTION = 'New_Section_Popup'
+TYPE_ENABLE_DISABLE = 'Enable/Disable'
+TYPE_CHANGE_TAB_NAME = 'Change tab_name'
+TYPE_REMOVE_TAB = 'Remove tab'
+TYPE_OVERWRITE_VALIDATION = 'Overwrite_validation'
+KEY_IMAGE = 'Image'
+KEY_IMAGE_Y = 'Image_Y'
+KEY_IMAGE_two = 'Imagetwo'
+TYP_BEARING = "Bearing Bolt"
+TYP_FRICTION_GRIP = "Friction Grip Bolt"
+
+###################################
+# Module Keys DONOT CHANGE THESE
+###################################
+KEY_MAIN_MODULE = 'Main Module'
+KEY_MODULE_STATUS = 'Module.Status'
+
+TYPE_MODULE = 'Window Title'
+
+KEY_DISP_FINPLATE = 'Fin Plate Connection'
+KEY_DISP_ENDPLATE = 'End Plate Connection'
+KEY_DISP_CLEATANGLE = 'Cleat Angle Connection'
+KEY_DISP_SEATED_ANGLE = 'Seated Angle Connection'
+KEY_DISP_BASE_PLATE = 'Base Plate Connection'
+KEY_DISP_TRUSS_BOLTED = 'Truss Connection Bolted'
+
+KEY_DISP_BEAMCOVERPLATE = 'Beam-to-Beam Cover Plate Bolted Connection'
+KEY_DISP_COLUMNCOVERPLATE = 'Column-to-Column Cover Plate Bolted Connection'
+KEY_DISP_BEAMCOVERPLATEWELD = 'Beam-to-Beam Cover Plate Welded Connection'
+KEY_DISP_COLUMNCOVERPLATEWELD = 'Column-to-Column Cover Plate Welded Connection'
+KEY_DISP_LAPJOINTBOLTED = 'Lap Joint Bolted Connection'
+KEY_DISP_LAPJOINTWELDED = 'Lap Joint Welded Connection'
+KEY_DISP_BUTTJOINTBOLTED = 'Butt Joint Bolted Connection'
+WELD_SIZES = [3, 5, 6, 10, 12]
+
+#Simpleconnections (Tension+compression)
+KEY_DESIGN_FOR = 'Design.For'
+KEY_DISP_DESIGN_FOR = 'Design For'
+KEY_AXIAL_FORCE = 'Load.Axial.Force'  # If not using existing KEY_AXIAL
+KEY_DISP_AXIAL_FORCE = 'Axial Force (kN)'
+
+# MADE THIS t.s.
+KEY_DISP_BUTTJOINTWELDED = 'Butt Joint Welded Connection'
+KEY_OUT_UTILISATION_RATIO = 'Utilisation Ratio'
+KEY_OUT_DISP_UTILISATION_RATIO = 'Utilisation Ratio'
+KEY_OUT_NO_COVER_PLATE = 'No Cover Plate'
+KEY_OUT_DISP_NO_COVER_PLATE = 'No Cover Plate'
+KEY_OUT_WIDTH_COVER_PLATE = 'Width of Cover Plate'
+KEY_OUT_DISP_WIDTH_COVER_PLATE = 'Width of Cover Plate'
+KEY_OUT_THICKNESS_COVER_PLATE = 'Thickness of Cover Plate'
+KEY_OUT_DISP_THICKNESS_COVER_PLATE = 'Thickness of Cover Plate'
+KEY_OUT_LENGTH_COVER_PLATE = 'Length of Cover Plate'
+KEY_OUT_DISP_LENGTH_COVER_PLATE = 'Length of Cover Plate'
+DISP_TITLE_COVER_PLATE = 'Cover Plate Details'
+KEY_WELD_SIZE = 'Weld.Size'
+KEY_DISP_WELD_SIZE = 'Weld Size'
+KEY_DISP_COVER_PLT = 'Cover Plate *'
+KEY_DP_WELD_SIZE = 'Weld.Size'
+KEY_WELD_GRADE = 'Weld.Grade'
+KEY_EFF_THROAT_THICKNESS = 'Effective Throat Thickness'
+KEY_DESIGN_STRENGTH_WELD = 'Design Strength of Weld'
+KEY_OUT_DISP_WELD_STRENGTH_kN = 'Strength (kN)'
+
+# end
+
+
+# KEY_DISP_BEAMENDPLATE = 'Beam End Plate Connection'
+KEY_DISP_COLUMNENDPLATE = 'Column-to-Column End Plate Connection'
+KEY_DISP_BCENDPLATE = 'Beam-to-Column End Plate Connection'
+KEY_DISP_TENSION_BOLTED = 'Tension Member Design - Bolted to End Gusset'
+KEY_DISP_TENSION_WELDED = 'Tension Member Design - Welded to End Gusset'
+KEY_DISP_BB_EP_SPLICE = 'Beam-to-Beam End Plate Connection'
+KEY_DISP_COMPRESSION = 'Compression Member'
+KEY_DISP_COMPRESSION_STRUT = 'Compression Member Design - Strut Design'
+
+DISP_TITLE_CM = 'Connecting Members'
+
+# Compression Members
+KEY_DISP_COMPRESSION_COLUMN = 'Columns with known support conditions'
+KEY_DISP_STRUT_WELDED_END_GUSSET = 'Struts Welded to End Gusset'
+KEY_SECTION_PROPERTY = 'Section Property'
+KEY_SECTION_DATA = 'Section Data'
+KEY_MEMBER_PROPERTY = 'Member Property'
+KEY_MEMBER_DATA = 'Member.Data'
+KEY_SECTION_PROFILE = 'Section.Profile'
+KEY_DISP_SECTION_PROFILE = 'Section Profile *'
+VALUES_SEC_PROFILE_COLUMN = ['Beams', 'Columns', 'RHS', 'SHS', 'CHS', 'Angles']
+KEY_SECTION_DEFINITION = 'SectionDefinition'
+KEY_DISP_SECTION_DEFINITION = 'Section Definition*'
+KEY_DISP_MEMBER_DATA = 'Member Data'
+KEY_ACTUAL_LENGTH = 'Length.Actual'
+KEY_DISP_ACTUAL_LENGTH = 'Actual Length'
+KEY_COLUMN_DESIGN = 'Column Design'
+KEY_COLUMN_CAPACITY = 'Column.Capacity'
+KEY_DISP_COLUMN_CAPACITY = 'Column Capacity (kN)'
+KEY_ACTUAL_LEN_ZZ = 'Actual.Length_zz'
+KEY_DISP_ACTUAL_LEN_ZZ = 'Actual Length (z-z), mm'
+KEY_ACTUAL_LEN_YY = 'Actual.Length_yy'
+KEY_DISP_ACTUAL_LEN_YY = 'Actual Length (y-y), mm'
+KEY_UNSUPPORTED_LEN_ZZ = 'Unsupported.Length_zz'
+KEY_DISP_UNSUPPORTED_LEN_ZZ = 'Unsupported Length (z-z), mm *'
+KEY_UNSUPPORTED_LEN_YY = 'Unsupported.Length_yy'
+KEY_DISP_UNSUPPORTED_LEN_YY = 'Unsupported Length (y-y), mm *'
+KEY_DESIGN_COMPRESSION = 'Design Results'
+KEY_DESIGN_STRENGTH_COMPRESSION = 'Design.Strength'
+KEY_MIN_DESIGN_COMP_STRESS = 'MinCompStress'
+KEY_MIN_DESIGN_COMP_STRESS_VAL = 'Min. Design Comp.Stress (MPa)'
+KEY_MAT_STRESS = 'MaterialStress'
+KEY_DISP_MAT_STRESS = 'fy/gamma_m0'
+KEY_FCD = 'Fcd'
+KEY_DISP_FCD = 'f_cd'
+KEY_DISP_DESIGN_STRENGTH_COMPRESSION = 'Design Strength (kN)'
+DISP_TITLE_OPTIMUM_SECTION = 'Optimum Section'
+KEY_TITLE_OPTIMUM_DESIGNATION = 'Optimum.Designation'
+KEY_DISP_TITLE_OPTIMUM_DESIGNATION = 'Designation'
+KEY_OPTIMUM_UR_COMPRESSION = 'Optimum.UR'
+KEY_DISP_OPTIMUM_UR_COMPRESSION = 'Utilization Ratio'
+KEY_OPTIMUM_SC = 'Optimum.SectionClassification'
+KEY_DISP_OPTIMUM_SC = 'Section Classification'
+DISP_TITLE_ZZ = 'Major Axis (z-z)'
+DISP_TITLE_YY = 'Minor Axis (y-y)'
+KEY_EFF_LEN_ZZ = 'Major.Effective_Length'
+KEY_DISP_EFF_LEN_ZZ = 'Effective Length (m)'
+KEY_EFF_LEN_YY = 'MinorEffLen'
+KEY_DISP_EFF_LEN_YY = 'Effective Length (m)'
+KEY_EULER_BUCKLING_STRESS_ZZ = 'MajorBucklingStress'
+KEY_DISP_EULER_BUCKLING_STRESS_ZZ = 'Euler Buckling Stress (MPa)'
+KEY_EULER_BUCKLING_STRESS_YY = 'MinorBucklingStress'
+KEY_DISP_EULER_BUCKLING_STRESS_YY = 'Euler Buckling Stress (MPa)'
+KEY_BUCKLING_CURVE_ZZ = 'MajorBC'
+KEY_DISP_BUCKLING_CURVE_ZZ = 'Buckling Curve Classification'
+KEY_BUCKLING_CURVE_YY = 'MinorBC'
+KEY_DISP_BUCKLING_CURVE_YY = 'Buckling Curve Classification'
+KEY_IMPERFECTION_FACTOR_ZZ = 'MajorIF'
+KEY_DISP_IMPERFECTION_FACTOR_ZZ = 'Imperfection Factor'
+KEY_IMPERFECTION_FACTOR_YY = 'MinorIF'
+KEY_DISP_IMPERFECTION_FACTOR_YY = 'Imperfection Factor'
+KEY_SR_FACTOR_ZZ = 'MajorSRF'
+KEY_DISP_SR_FACTOR_ZZ = 'Stress Reduction Factor'
+KEY_SR_FACTOR_YY = 'MinorSRF'
+KEY_DISP_SR_FACTOR_YY = 'Stress Reduction Factor'
+KEY_NON_DIM_ESR_ZZ = 'MajorNDESR'
+KEY_DISP_NON_DIM_ESR_ZZ = 'Non-dimensional Effective SR (z-z)'
+KEY_NON_DIM_ESR_YY = 'MinorNDESR'
+KEY_DISP_NON_DIM_ESR_YY = 'Non-dimensional Effective SR (y-y)'
+KEY_EFF_SEC_AREA_ZZ = 'MajorEffSecArea'
+KEY_DISP_EFF_SEC_AREA_ZZ = 'Effective Sectional Area (mm2)'
+KEY_EFF_SEC_AREA_YY = 'MinorEffSecArea'
+KEY_DISP_EFF_SEC_AREA_YY = 'Effective Sectional Area (mm2)'
+KEY_COMP_STRESS_ZZ = 'MajorDCS'
+KEY_DISP_COMP_STRESS_ZZ = 'Design Compressive Stress (MPa)'
+KEY_COMP_STRESS_YY = 'MinorDCS'
+KEY_DISP_COMP_STRESS_YY = 'Design Compressive Stress (MPa)'
+KEY_DISP_DESIGN_STRENGTH_YY = 'Pd (kN)'
+KEY_DISP_DESIGN_STRENGTH_ZZ = 'Pd (kN)'
+KEY_DESIGN_STRENGTH_YY = 'DesignStrength.y-y'
+KEY_DESIGN_STRENGTH_ZZ = 'DesignStrength.z-z'
+##Strut Design
+###################################
+KEY_SHEAR_STRENGTH = 'Shear.Strength'
+KEY_SHEAR_STRENGTH_YY = 'Shear.Strength_YY'
+KEY_SHEAR_STRENGTH_ZZ = 'Shear.Strength_ZZ'
+KEY_MOMENT_STRENGTH = 'Moment.Strength'
+KEY_MOMENT_STRENGTH_YY = 'Moment.Strength_YY'
+KEY_MOMENT_STRENGTH_ZZ = 'Moment.Strength_ZZ'
+KEY_DISP_HIGH_SHEAR= 'High Shear Check'
+KEY_DISP_HIGH_SHEAR_YY= 'High Shear Check (y-y)'
+KEY_DISP_HIGH_SHEAR_ZZ= 'High Shear Check (z-z)'
+KEY_HIGH_SHEAR = 'Shear.High'
+KEY_HIGH_SHEAR_YY = 'Shear.High_YY'
+KEY_HIGH_SHEAR_ZZ = 'Shear.High_ZZ'
+KEY_DISP_DESIGN_STRENGTH_SHEAR = 'Shear Strength (kN)' # Design 
+KEY_DISP_DESIGN_STRENGTH_SHEAR_YY = 'Shear Strength (y-y) (kN)'
+KEY_DISP_DESIGN_STRENGTH_SHEAR_ZZ = 'Shear Strength (z-z) (kN)'
+KEY_DISP_DESIGN_STRENGTH_MOMENT = 'Moment Strength (kNm)' # Design
+KEY_DISP_DESIGN_STRENGTH_MOMENT_YY = 'Moment Strength (y-y) (kNm)'
+KEY_DISP_DESIGN_STRENGTH_MOMENT_ZZ = 'Moment Strength (z-z) (kNm)'
+KEY_DISP_REDUCE_STRENGTH_MOMENT = 'Reduced Moment Strength (kNm)'
+KEY_EULER_BUCKLING_STRESS = 'MajorBucklingStress'
+KEY_DISP_EULER_BUCKLING_STRESS = 'Buckling Stress (MPa)' # Euler 
+KEY_EFF_SEC_AREA = 'MajorEffSecArea'
+KEY_DISP_EFF_SEC_AREA = 'Eff. Sectional Area (cm<sup>2</sup>)' # ective
+KEY_EFF_LEN = 'Major.Effective_Length'
+KEY_DISP_EFF_LEN = 'Eff. Length (m)' # ective
+KEY_BUCKLING_CURVE = 'BucklingCurve'
+KEY_DISP_BUCKLING_CURVE = 'Buckling Curve' #  Classification
+KEY_IMPERFECTION_FACTOR = 'ImperfectionFactor'
+KEY_DISP_IMPERFECTION_FACTOR = 'Imperfection' # Factor
+KEY_SR_FACTOR = 'StressReductionFactor'
+KEY_DISP_SR_FACTOR = 'Stress Reduction' # Factor
+KEY_NON_DIM_ESR = 'NDESR'
+KEY_DISP_NON_DIM_ESR = 'ND Eff. Senderness'
+KEY_ALLOW_CLASS = 'Optimum.Class'
+KEY_DISP_CLASS = 'Semi-compact sections'
+DISP_TITLE_STRUT_SECTION = 'Section Details'
+KEY_ALLOW_LOAD = 'Load.Type'
+KEY_DISP_LOAD = 'Type of Load'
+KEY_DISP_ESR = 'Effective SR'
+KEY_ESR = 'ESR'
+KEY_SR_lambdavv = 'ESRLambdavv'
+KEY_DISP_SR_lambdavv = 'Lambda v-v'
+KEY_SR_lambdapsi = 'ESRLambdapsi'
+KEY_DISP_SR_lambdapsi = 'Lambda psi'
+Buckling_Type = 'Type of Buckling'
+End_Connection_title = 'End Connection Details'
+KEY_COMP_STRESS = 'MinorDCS'
+KEY_DISP_COMP_STRESS = 'Compressive Stress (MPa)'
+KEY_DISP_DESIGN_BENDING_STRENGTH = 'Design Bending Strength (kNm)'
+
+KEY_Buckling_Out_plane = ' Out_of_Plane'
+KEY_Buckling_In_plane =  ' In_Plane'
+Buckling_Out_plane = ' Out of Plane'
+Buckling_In_plane =  ' In Plane'
+Load_type1 = 'Concentric Load'
+Load_type2 = 'Leg Load'
+Strut_load = list((Load_type1, Load_type2))
+IMG_STRUT_1 = str(files("osdag_core.data.ResourceFiles.images").joinpath("bA.png"))
+IMG_STRUT_2 = str(files("osdag_core.data.ResourceFiles.images").joinpath("bBBA.png"))
+IMG_STRUT_3 = str(files("osdag_core.data.ResourceFiles.images").joinpath("back_back_same_side_angles.png"))
+VALUES_IMG_STRUT = list(( IMG_STRUT_1, IMG_STRUT_2, IMG_STRUT_3))
+KEY_BOLT_Number = 'Bolt.Number'
+Strut_Bolt_Number = 'Number of Bolts'
+Profile_name_1 = 'Angles'
+Profile_name_2 = 'Back to Back Angles - Same side of gusset'
+Profile_name_3 = 'Back to Back Angles - Opposite side of gusset'
+loc_type1 = 'Long Leg'
+loc_type2 = 'Short Leg'
+VALUES_SEC_PROFILE_Compression_Strut = list((Profile_name_1, Profile_name_2, Profile_name_3)) #other sections can be added later the elements and not before 'Star Angles', 'Channels', 'Back to Back Channels'
+Profile_2_img1 = str(files("osdag_core.data.ResourceFiles.images").joinpath("bblssg_eq.png")) # Back to back Long leg on same side of gusset for equal angle
+Profile_2_img2 = str(files("osdag_core.data.ResourceFiles.images").joinpath("bbsssg_eq.png"))# Back to back short leg on same side of gusset for equal angle
+Profile_2_img3 = str(files("osdag_core.data.ResourceFiles.images").joinpath("bblssg_ueq.png"))# Back to back Long leg on same side of gusset for unequal angle
+Profile_2_img4 = str(files("osdag_core.data.ResourceFiles.images").joinpath("bbsssg_ueq.png"))# Back to back short leg on same side of gusset for unequal angle
+
+KEY_ALLOW_CLASS1 = 'Optimum.Class1'
+KEY_DISP_CLASS1 = 'Choose Plastic sections'
+KEY_ALLOW_CLASS2 = 'Optimum.Class2'
+KEY_DISP_CLASS2 = 'Choose Compact sections'
+KEY_ALLOW_CLASS3 = 'Optimum.Class3'
+KEY_DISP_CLASS3 = 'Choose Semi-compact sections'
+KEY_ALLOW_CLASS4 = 'Optimum.Class4'
+KEY_DISP_CLASS4 = 'Choose Slender sections'
+KEY_ALLOW_UR = 'Optimum.AllowUR'
+KEY_DISP_UR = 'Allowable Utilization Ratio (UR)'
+KEY_OPTIMIZATION_PARA = 'Optimum.Para'
+KEY_DISP_OPTIMIZATION_PARA = 'Optimization Parameter'
+KEY_EFFECTIVE_AREA_PARA = 'Effective.Area_Para'
+KEY_DISP_EFFECTIVE_AREA_PARA = 'Effective Area Parameter'
+KEY_DISP_SECTION_DEFINITION_DP = 'Section Definition (Table 2)'
+KEY_DISP_OPTIMIZATION_STEEL_COST = 'Cost'
+KEY_STEEL_COST = 'Steel.Cost'
+KEY_DISP_STEEL_COST = 'Steel cost (INR / per kg)'
+
+###################################
+#Flexure Members
+###################################
+KEY_Plastic = "Plastic"
+KEY_Compact = "Compact"
+KEY_SemiCompact = "Semi-Compact"
+KEY_Flexure_Member_MAIN_MODULE = 'Flexure Member'
+KEY_DISP_FLEXURE = 'Flexural Members - Simply Supported'
+KEY_DISP_FLEXURE2 = 'Flexural Members - Cantilever'
+KEY_DISP_FLEXURE3 = 'Flexural Members'
+KEY_DISP_FLEXURE4 = 'Flexural Members - Purlins'
+
+KEY_DISP_PLASTIC_STRENGTH_MOMENT = 'Plastic Strength (kNm)'
+KEY_DISP_Bending_STRENGTH_MOMENT = 'Bending Strength (kNm)'
+KEY_DISP_LTB_Bending_STRENGTH_MOMENT = 'Lateral Torsional Buckling Strength (kNm)'
+
+KEY_DISP_betab_constatnt= 'Beta<sub>b</sub>'
+KEY_betab_constatnt= 'Beta.Constant'
+KEY_BUCKLING_STRENGTH= 'Buckling.Strength'
+KEY_DISP_BUCKLING_STRENGTH= 'Buckling Strength (kN)'
+KEY_WEB_CRIPPLING= 'Crippling.Strength'
+KEY_DISP_CRIPPLING_STRENGTH = 'Crippling Strength (kN)'
+KEY_DISP_LTB= 'Lateral Torsional Buckling Details'
+KEY_DISP_Elastic_CM= 'Critical Moment (M<sub>cr</sub>) (kNm)'# Elastic
+KEY_DISP_Elastic_CM_YY= 'Critical Moment (y-y) (M<sub>cr</sub>)'
+KEY_DISP_Elastic_CM_ZZ= 'Critical Moment (z-z) (M<sub>cr</sub>)'
+KEY_DISP_Elastic_CM_latex= 'Elastic Critical Moment(kNm)' #
+KEY_DISP_T_constatnt= 'Torsional Constant (mm<sup>4</sup>)' #  (I<sub>t</sub>)
+KEY_DISP_W_constatnt= 'Warping Constant (mm<sup>6</sup>)' # (I<sub>w</sub>)
+KEY_LTB= 'L.T.B.Details'
+KEY_Elastic_CM= 'Elastic.Moment'
+KEY_Elastic_CM_YY = 'Elastic.Moment_YY'
+KEY_Elastic_CM_ZZ = 'Elastic.Moment_ZZ'
+KEY_T_constatnt= 'T.Constant'
+KEY_W_constatnt= 'W.Constant'
+KEY_IMPERFECTION_FACTOR_LTB = 'Imperfection.LTB'
+KEY_SR_FACTOR_LTB = 'SR.LTB'
+KEY_NON_DIM_ESR_LTB = 'NDESR.LTB'
+# KEY_LTB= 'Lateral Torsional Buckling Details'
+KEY_WEB_BUCKLING= 'Web Buckling Details'
+KEY_WEB_RESISTANCE= 'Web Resistance Details'
+KEY_BEARING_LENGTH = 'Bearing.Length'
+Simply_Supported_img = str(files("osdag_core.data.ResourceFiles.images").joinpath("ss_beam.png"))
+Cantilever_img = str(files("osdag_core.data.ResourceFiles.images").joinpath("c_beam.png"))
+Purlin_img = str(files("osdag_core.data.ResourceFiles.images").joinpath("purlin.jpg"))
+KEY_LENGTH_OVERWRITE = 'Length.Overwrite'
+KEY_DISPP_LENGTH_OVERWRITE = 'Effective Length Parameter'
+KEY_DISP_BEAM_MOMENT = 'Bending Moment (kNm)(M<sub>z-z</sub>)'
+KEY_DISP_BEAM_MOMENT_Latex = 'Bending Moment (kNm)' # ($M_{z-z}$)
+KEY_SUPP_TYPE = 'Member.Type'
+DISP_TITLE_ISECTION = 'I Sections'
+KEY_DISP_CLADDING = 'Cladding (For Deflection)'
+
+#Web Resistance Values
+KEY_BENDING_COMPRESSIVE_STRESS_YY = 'Resistance.Bending_Cmp_Stress_yy'
+KEY_BENDING_COMPRESSIVE_STRESS_ZZ = 'Resistance.Bending_Cmp_Stress_zz'
+KEY_DISP_BENDING_COMPRESSIVE_STRESS_YY = 'Bending Compressive Stress (y-y)'
+KEY_DISP_BENDING_COMPRESSIVE_STRESS_ZZ = 'Bending Compressive Stress (z-z)'
+KEY_BENDING_STRESS_RF_YY = 'Resistance.Bending_Stress_RF_yy'
+KEY_BENDING_STRESS_RF_ZZ = 'Resistance.Bending_Stress_RF_zz'
+KEY_DISP_BENDING_STRESS_RF_YY = 'Bending Stress Reduction Factor (y-y)'
+KEY_DISP_BENDING_STRESS_RF_ZZ = 'Bending Stress Reduction Factor (z-z)'
+KEY_RESISTANCE_MOMENT_YY = 'Resistance.Moment_YY'
+KEY_RESISTANCE_MOMENT_ZZ = 'Resistance.Moment_ZZ'
+KEY_DISP_RESISTANCE_MOMENT_YY = 'Moment (y-y)'
+KEY_DISP_RESISTANCE_MOMENT_ZZ = 'Moment (z-z)'
+KEY_BUCKLING_CLASS = "Buckling Class"
+KEY_DISP_BUCKLING_CLASS = "Buckling Class"
+
+KEY_DISP_DESIGN_TYPE_FLEXURE = 'Laterally Supported'
+KEY_DESIGN_TYPE_FLEXURE = 'Flexure.Type'
+KEY_BEAM_SUPP_TYPE = 'Support Type *'
+KEY_BEAM_SUPP_TYPE_DESIGN = 'Design Support Type'
+KEY_DISP_DESIGN_TYPE2_FLEXURE = 'Laterally Unsupported'
+KEY_DESIGN_TYPE2_FLEXURE = 'Laterally.Unsupported'
+KEY_DISP_BENDING = 'Axis of Bending'
+KEY_DISP_BENDING1 = 'Major'
+KEY_DISP_BENDING2 = 'Minor'
+VALUES_BENDING_TYPE = list((KEY_DISP_BENDING2, KEY_DISP_BENDING1))
+VALUES_SUPP_TYPE = list((KEY_DISP_DESIGN_TYPE_FLEXURE, KEY_DISP_DESIGN_TYPE2_FLEXURE)) #[KEY_DISP_DESIGN_TYPE_FLEXURE, KEY_DISP_DESIGN_TYPE2_FLEXURE]
+VALUES_SUPP_TYPE_temp = list((KEY_DISP_BENDING1 + " " + KEY_DISP_DESIGN_TYPE_FLEXURE, KEY_DISP_BENDING2 + " " + KEY_DISP_DESIGN_TYPE2_FLEXURE, KEY_DISP_BENDING1 + " " + KEY_DISP_DESIGN_TYPE2_FLEXURE)) #[KEY_DISP_DESIGN_TYPE_FLEXURE, KEY_DISP_DESIGN_TYPE2_FLEXURE]
+KEY_BENDING = 'Bending.type'
+KEY_SUPPORT = 'Flexure.Support'
+KEY_DISP_SUPPORT = 'End Conditions'
+KEY_DISP_SUPPORT1 = 'Simply Supported'
+KEY_DISP_SUPPORT2 = 'Cantilever'
+KEY_DISP_SUPPORT3 = 'Purlins'
+KEY_DISP_SUPPORT_LIST = list((KEY_DISP_SUPPORT1, KEY_DISP_SUPPORT2, KEY_DISP_SUPPORT3)) #[KEY_DISP_SUPPORT1, KEY_DISP_SUPPORT2]
+# KEY_SUPPORT1 = 'SimpSupport.Torsional'
+# KEY_SUPPORT2 = 'SimpSupport.Warping'
+KEY_CLADDING_TYPE1 = 'Brittle Cladding'
+KEY_CLADDING_TYPE2 = 'Elastic Cladding'
+KEY_CLADDING = 'Cladding.type'
+VALUES_CLADDING = list((KEY_CLADDING_TYPE1, KEY_CLADDING_TYPE2))
+KEY_DISP_LENGTH_BEAM = 'Effective Span (m)*'
+KEY_LOAD = 'Loading.Condition'
+KEY_DISP_LOAD = 'Loading Condition'
+KEY_DISP_LOAD1 ='Normal'
+KEY_DISP_LOAD2 = 'Destabilizing'
+KEY_DISP_LOAD_list = list((KEY_DISP_LOAD1, KEY_DISP_LOAD2))
+KEY_TORSIONAL_RES = 'Torsion.restraint'
+DISP_TORSIONAL_RES = 'Torsional Restraint *'
+Torsion_Restraint1 = 'Fully Restrained'
+Torsion_Restraint2 = 'Partially Restrained-support connection'
+Torsion_Restraint3 = 'Partially Restrained-bearing support'
+Torsion_Restraint_list = list(( Torsion_Restraint1, Torsion_Restraint2, Torsion_Restraint3))
+KEY_WARPING_RES = 'Warping.restraint'
+DISP_WARPING_RES = 'Warping Restraint *'
+Warping_Restraint1 = 'Both flanges fully restrained'
+Warping_Restraint2 = 'Compression flange fully restrained'
+# Warping_Restraint3 = 'Both flanges fully restrained'
+Warping_Restraint4 = 'Compression flange partially restrained'
+Warping_Restraint5 = 'Warping not restrained in both flanges'
+Warping_Restraint_list = list(( Warping_Restraint1, Warping_Restraint2, Warping_Restraint4, Warping_Restraint5))
+DISP_SUPPORT_RES = 'Support restraint *'
+KEY_SUPPORT_TYPE = 'Cantilever.Support'
+Support1 = 'Continous, with lateral restraint to top flange'
+Support2 = 'Continous, with partial torsional restraint'
+Support3 = 'Continous, with lateral and torsional restraint'
+Support4 = 'Restrained laterally, torsionally and against rotation on flange'
+Supprt_Restraint_list = list(( Support1, Support2, Support3, Support4))
+DISP_TOP_RES = 'Top restraint *'
+KEY_SUPPORT_TYPE2 = 'Cantilever.Top'
+Top1 = 'Free'
+Top2 = 'Lateral restraint to top flange'
+Top3 = 'Torsional rwstraint'
+Top4 = 'Lateral and Torsional restraint'
+Top_Restraint_list = list(( Top1, Top2, Top3, Top4))
+KEY_WEB_BUCKLING_option = ['Method A','Method B']
+KEY_BUCKLING_METHOD = 'Buckling.Method'
+KEY_ShearBuckling = 'Shear Buckling Design Method '
+KEY_ShearBucklingOption = 'S.B.Methods'
+KEY_DISP_SB_Option = ['Simple Post Critical', 'Tension Field Test']
+KEY_DISP_TENSION_HOLES = 'Tension Zone'
+KEY_DISP_Web_Buckling = 'Web Buckling'
+KEY_DISP_Utilization_Ratio = 'Utilization Ratio'
+KEY_DISP_Web_Buckling_Support = 'Web Buckling @Support'
+KEY_DISP_I_eff_latex = '$I_{eff}$web'
+KEY_DISP_A_eff_latex = '$A_{eff}$web'
+KEY_DISP_r_eff_latex = '$r_{eff}$web'
+KEY_DISP_K_v_latex = '$K_{v}$'
+KEY_DISP_Elastic_Critical_shear_stress_web = 'Elastic Critical Shear Stress Web($N/mm^2$)' #(\tau_{crc})
+KEY_DISP_Transverse_Stiffener_spacing = 'Spacing of Transverse Stiffeners(c)(mm)'
+KEY_DISP_slenderness_ratio_web = r'Web Slenderness ratio($\lambda_w$)'
+KEY_DISP_BUCKLING_STRENGTH= 'Buckling Resistance (kN)'
+KEY_DISP_reduced_moment= 'Reduced moment (Nmm)'
+# KEY_DISP_reduced_moment= 'Reduced moment (N_f)'
+KEY_DISP_tension_field_incline= r'Tension field inclination($\phi$)'
+KEY_DISP_Yield_Strength_Tension_field = 'Yield Strength of Tension field(f_v)($N/mm^2$)'
+KEY_DISP_AnchoragelengthTensionField= 'Anchorage length of Tension Field(s)(mm)'
+KEY_DISP_WidthTensionField= 'Width of Tension Field($w_{tf}$)'
+
+###################################
+# Plate Girder
+###################################
+KEY_PLATE_GIRDER_MAIN_MODULE = 'PLATE GIRDER'
+KEY_DISP_PLATE_GIRDER_WELDED = 'PLATE GIRDER'
+KEY_DISP_PG_SectionDetail = 'Section Details'
+KEY_tf = 'TF.Data'
+KEY_tw = 'TW.Data'
+KEY_dw = 'DW.Data'
+KEY_bf = 'BF.Data'
+KEY_DISP_tf = 'Flange Thickness(mm)'
+KEY_DISP_tw = 'Web Thickness(mm)'
+KEY_DISP_dw = 'Web Depth(mm)'
+KEY_DISP_bf = 'Flange Width(mm)'
+KEY_IntermediateStiffener = 'IntermediateStiffener.Data'
+KEY_DISP_IntermediateStiffener = 'Intermediate Stiffener'
+KEY_DISP_Plate_Girder_PROFILE = 'Section Profile'
+KEY_IntermediateStiffener_spacing = 'IntermediateStiffener.Spacing'
+KEY_DISP_IntermediateStiffener_spacing = 'Intermediate Stiffener Spacing (mm)'
+KEY_LongitudnalStiffener = 'LongitudnalStiffener.Data'
+KEY_LongitudnalStiffener_thickness = 'LongitudnalStiffner.Thickness'
+KEY_LongitudnalStiffener_thickness_val = 'LongitudnalStiffner.Thickness.val'
+KEY_DISP_LongitudnalStiffener = 'Longitudnal Stiffener'
+KEY_DISP_LongitudnalStiffener_thickness = 'Longitudnal Stiffener Thickness (mm)'
+KEY_IntermediateStiffener_thickness = 'IntermediateStiffener.Thickness'
+KEY_IntermediateStiffener_thickness_val = 'IntermediateStiffener.Thickness.val'
+KEY_DISP_IntermediateStiffener_thickness = 'Intermediate Stiffener Thickness (mm)'
+KEY_WeldWebtoflange= 'WeldWebtoflange.Data'
+KEY_DISP_WeldWebtoflange= 'Weld for Web to Flange (mm)'
+KEY_WeldStiffenertoweb= 'WeldStiffenertoweb.Data'
+KEY_DISP_WeldStiffenertoweb= 'Weld for Stiffener to Web (mm)'
+KEY_IS_IT_SYMMETRIC = 'Girder.Symmetry'
+KEY_DISP_IS_IT_SYMMETRIC = 'Symmetry'
+KEY_DISP_SYM = 'Symmetric Girder'
+KEY_DISP_UNSYM = 'Unsymmetric Girder'
+KEY_DISP_SYMMETRIC_list = list((KEY_DISP_SYM, KEY_DISP_UNSYM))
+KEY_TOP_FLANGE_THICKNESS_PG = 'TopFlange.Thickness'
+KEY_DISP_TOP_FLANGE_THICKNESS_PG = 'Top Flange Thickness (mm)'
+KEY_OVERALL_DEPTH_PG = 'Total.Depth'
+KEY_OVERALL_DEPTH_PG_TYPE = 'Total.Design_Type'
+KEY_DISP_OVERALL_DEPTH_PG_TYPE = 'Design Type'
+KEY_DISP_OVERALL_DEPTH_PG = 'Total Depth (mm)'
+KEY_WEB_THICKNESS_PG = 'Web.Thickness'
+KEY_DISP_WEB_THICKNESS_PG = 'Web Thickness (mm)'
+KEY_TOP_Bflange_PG_Type = 'Topflange.Width_Type'
+KEY_DISP_TOP_Bflange_PG_Type = 'Top Flange Width Type'
+KEY_TOP_Bflange_PG = 'Topflange.Width'
+KEY_DISP_TOP_Bflange_PG = 'Width of Top Flange (mm)'
+KEY_BOTTOM_Bflange_PG_Type = 'Bottomflange.Width_Type'
+KEY_DISP_BOTTOM_Bflange_PG_Type = 'Bottom Flange Width Type'
+KEY_BOTTOM_Bflange_PG = 'Bottomflange.Width'
+KEY_DISP_BOTTOM_Bflange_PG = 'Width of Bottom Flange (mm)'
+KEY_BOTTOM_FLANGE_THICKNESS_PG = 'BottomFlange.Thickness'
+KEY_DISP_BOTTOM_FLANGE_THICKNESS_PG = 'Bottom Flange Thickness (mm)'
+KEY_STR_TYPE = 'Structure.Type'
+KEY_DISP_STR_TYPE = 'Type of Structure'
+KEY_WEB_PHILOSOPHY = 'Web.Philosophy'
+KEY_DISP_WEB_PHILOSOPHY = 'Web Philosophy'
+KEY_DISP_SECTION_DATA_PG = 'Design Inputs'
+KEY_LOADING = 'Factored Maximum Loads'
+KEY_DISP_STR_TYP1 = 'Highway Bridge'
+KEY_DISP_STR_TYP2 = 'Railway Bridge'
+KEY_DISP_STR_TYP3 = 'Industrial Structure'
+KEY_DISP_STR_TYP4 = 'Other Building'
+KEY_DISP_STR_TYPE_list = [KEY_DISP_STR_TYP1, KEY_DISP_STR_TYP2, KEY_DISP_STR_TYP3,KEY_DISP_STR_TYP4]
+KEY_DISP_PHILO1 = 'Thin Web with ITS'
+KEY_DISP_PHILO2 = 'Thick Web without ITS'
+WEB_PHILOSOPHY_list = list((KEY_DISP_PHILO1, KEY_DISP_PHILO2))
+KEY_DISP_DESIGN_STIFFER = 'Stiffener Design'
+KEY_DISP_WELD_DESIGN = 'Weld Design'
+KEY_BENDING_MOMENT_SHAPE= 'Bendingmoment.shape'
+KEY_DISP_BENDING_MOMENT_SHAPE='Bending Moment Shape'
+KEY_UDL_PIN_PIN_PG='UDLPINPIN.Data'
+KEY_DISP_UDL_PIN_PIN_PG='Uniform Loading with pinned-pinned support'
+KEY_UDL_FIX_FIX_PG= 'UDLFIXFIX.Data'
+KEY_DISP_UDL_FIX_FIX_PG= 'Uniform Loading with fixed-fixed support'
+KEY_PL_PIN_PIN_PG= 'PLPINPIN.Data'
+KEY_DISP_PL_PIN_PIN_PG='Concentrate Load with pinned-pinned support'
+KEY_PL_FIX_FIX_PG= 'PLFIXFIX.Data'
+KEY_DISP_PL_FIX_FIX_PG= 'Concentrate load with fixed-fixed support'
+KEY_DISP_GIRDERSEC = 'Girder Properties'
+Bending_moment_shape_list= list((KEY_DISP_UDL_PIN_PIN_PG, KEY_DISP_UDL_FIX_FIX_PG, KEY_DISP_PL_PIN_PIN_PG,KEY_DISP_PL_FIX_FIX_PG))
+VALUES_DEPTH_PG = ['Customized','Optimized']
+VALUES_OPT = ['All']
+KEY_DESIGN_LOAD = 'Design.Load'
+KEY_DISP_DESIGN_LOAD = 'Design Load'
+VALUE_DESIGN_LOAD_list = ['Live load','Dead load', 'Crane Load(Manual operation)', 'Crane load(Electric operation up to 50t)', 'Crane load(Electric operation over 50t)']
+KEY_MEMBER_OPTIONS = 'Member.Options'
+KEY_DISP_MEMBER_OPTIONS = 'Member Options'
+# VALUES_MEMBER_OPTIONS_INDUS = ['Purlin and Girts', 'Simple span', 'Cantilever span', 'Rafter Supporting', 'Gantry']
+# VALUES_MEMBER_OPTIONS_OTHER = ['Floor and roof', 'Cantilever']
+# VALUES_MEMBER_OPTIONS_BRIDGE = ['Simple span', 'Cantilever span']
+VALUES_MEMBER_OPTIONS = [['Simple Span', 'Cantilever Span'],['Purlin and Girts', 'Simple span', 'Cantilever span', 'Rafter Supporting', 'Gantry'], ['Floor and roof', 'Cantilever']]
+KEY_SUPPORTING_OPTIONS = 'Supporting.Options'
+KEY_DISP_SUPPORTING_OPTIONS = 'Supporting Options'
+VALUES_SUPPORTING_OPTIONS_PSC = ['Elastic cladding', 'Brittle cladding']
+VALUES_SUPPORTING_OPTIONS_RS = ['Profiled Metal sheeting', 'Plastered sheeting']
+VALUES_SUPPORTING_OPTIONS_GNT = ['Crane']
+VALUES_SUPPORTING_OPTIONS_FRC = ['Elements not susceptible to cracking', 'Element susceptible to cracking']
+VALUES_SUPPORTING_OPTIONS_DEF = ['NA']
+KEY_MAX_DEFL = 'Deflection.Max'
+KEY_DISP_MAX_DEFL = 'Maximum Deflection'
+VALUES_MAX_DEFL = ['Span/600','Span/800','Span/400','Span/300','Span/360','Span/150','Span/180','Span/240','Span/120','Span/500','Span/750','Span/1000']
+KEY_SUPPORT_WIDTH = 'Support.Width'
+KEY_DISP_SUPPORT_WIDTH = 'Support Width (mm) *'
+VALUES_STIFFENER_THICKNESS = ['8', '10', '12', '14', '16', '18', '20', '22', '25', '28', '32', '36', '40', '45', '50', '56', '63', '75', '80', '90', '100',
+                        '110', '120']
+KEY_EndpanelStiffener_thickness = 'EndpanelStiffener.Thickness'
+KEY_LongitudnalStiffener_numbers = 'LongitudnalStiffener.Numbers'
+KEY_LongitudinalStiffener1_pos = 'LongitudnalStiffener1.Position'
+KEY_DISP_LongitudinalStiffener1_pos = 'Position of Longitudnal Stiffener 1 from NA (mm) '
+KEY_LongitudinalStiffener2_pos = 'LongitudnalStiffener2.Position'
+KEY_DISP_LongitudinalStiffener2_pos = 'Position of Longitudnal Stiffener 2 from NA (mm)'
+KEY_DISP_LongitudnalStiffener_numbers = 'Number of Longitudnal Stiffeners'
+KEY_DISP_EndpanelStiffener_thickness = 'End Panel Stiffener Thickness (mm)'
+KEY_OVERALL_DEPTH_PG_CST = "Overall Depth (D) (mm)"
+KEY_DISP_DESIGN_BENDING_STRENGTH = 'Design Bending Strength (kNm)'
+ 
+###################################
+# All Input Keys
+###################################
+KEY_MODULE = 'Module'
+KEY_CONN = 'Connectivity *'
+KEY_TABLE = 'Table'
+KEY_MEMBERS = 'No of Members'
+KEY_LOCATION = 'Conn_Location'
+KEY_ENDPLATE_TYPE = 'EndPlateType'
+KEY_MATERIAL = 'Material'
+KEY_MATERIAL_ST_SK = 'Material'
+KEY_MATERIAL_FU = 'Material.Fu'
+KEY_MATERIAL_FY = 'Material.Fy'
+
+
+KEY_SEC_MATERIAL = 'Member.Material'
+KEY_SEC_FU = 'Member.Fu'    #Extra Keys
+KEY_SEC_FY = 'Member.Fy'    #Extra Keys
+
+KEY_SECSIZE = 'Member.Designation'
+KEY_SECSIZE_DP = 'Member.Designation_dp'
+KEY_SECSIZE_SELECTED = 'Member.Designation_Selected'        #Extra Keys for Display
+KEY_SUPTNGSEC = 'Member.Supporting_Section.Designation'
+KEY_COLUMN_SECTION = 'Member.Column_Section.Designation'
+KEY_SUPTNGSEC_MATERIAL = 'Member.Supporting_Section.Material'
+KEY_A = 'Member.A'
+KEY_B = 'Member.B'
+
+
+KEY_SUPTDSEC_FU = 'Member.Supported_Section.Fu'     #Extra Keys for DP Display
+KEY_SUPTDSEC_FY = 'Member.Supported_Section.Fy'     #Extra Keys for DP Display
+
+KEY_SUPTDSEC = 'Member.Supported_Section.Designation'
+KEY_SUPTDSEC_MATERIAL = 'Member.Supported_Section.Material'
+KEY_SUPTNGSEC_FU = 'Member.Supporting_Section.Fu'   #Extra Keys for DP Display
+KEY_SUPTNGSEC_FY = 'Member.Supporting.Section.Fy'   #Extra Keys for DP Display
+
+KEY_LENGTH = 'Member.Length'
+KEY_SEC_PROFILE = 'Member.Profile'
+KEY_SEC_TYPE = 'Member.Type'
+
+KEY_SHEAR = 'Load.Shear'
+KEY_SHEAR_YY = 'Load.Shear.YY'
+KEY_SHEAR_ZZ = 'Load.Shear.ZZ'
+KEY_AXIAL = 'Load.Axial'
+KEY_MOMENT = 'Load.Moment'
+KEY_MOMENT_YY = 'Load.Moment_YY'
+KEY_MOMENT_ZZ = 'Load.Moment_ZZ'
+
+KEY_D = 'Bolt.Diameter'
+KEY_TYP = 'Bolt.Type'
+KEY_COF = 'Bolt.Coefficient'
+KEY_GRD = 'Bolt.Grade'
+
+# KEY_DP_BOLT_MATERIAL_G_O = 'Bolt.Material_Grade_OverWrite'
+KEY_DP_BOLT_HOLE_TYPE = 'Bolt.Bolt_Hole_Type'
+KEY_DP_BOLT_TYPE = 'Bolt.TensionType'
+KEY_DP_BOLT_SLIP_FACTOR = 'Bolt.Slip_Factor'
+
+KEY_CONNECTOR_MATERIAL = 'Connector.Material'
+KEY_CONNECTOR_FU = 'Connector.Fu'               #Extra Keys for DP Display
+KEY_CONNECTOR_FY = 'Connector.Fy'               #Extra Keys for DP Display
+KEY_CONNECTOR_FY_20 = 'Connector.Fy_20'         #Extra Keys for DP Display
+KEY_CONNECTOR_FY_20_40 = 'Connector.Fy_20_40'   #Extra Keys for DP Display
+KEY_CONNECTOR_FY_40 = 'Connector.Fy_40'         #Extra Keys for DP Display
+KEY_CONNECTOR_GUSSET = 'Connector.GUSSET'         #Extra Keys for DP Display
+
+
+KEY_PLATETHK = 'Connector.Plate.Thickness_List'
+KEY_FLANGEPLATE_PREFERENCES = 'Connector.Flange_Plate.Preferences'
+KEY_FLANGEPLATE_THICKNESS = 'Connector.Flange_Plate.Thickness_list'
+KEY_WEBPLATE_THICKNESS = 'Connector.Web_Plate.Thickness_List'
+KEY_ANGLE_LIST='Connector.Angle_List'
+KEY_ANGLE_SELECTED = 'Connector.Angle_Selected'
+KEY_SEATEDANGLE = 'Connector.Seated_Angle_List'
+KEY_TOPANGLE = 'Connector.Top_Angle'
+KEY_DISP_ANGLE_LIST = 'Seated Angle List'
+KEY_DISP_CLEAT_ANGLE_LIST = 'Cleat Angle List'
+KEY_DISP_TOPANGLE_LIST = 'Top Angle List'
+
+KEY_MOMENT_MAJOR = 'Load.Moment.Major'
+KEY_MOMENT_MINOR = 'Load.Moment.Minor'
+KEY_ANCHOR_OCF = 'Anchor Bolt.OCF'
+KEY_DISP_ANCHOR_OCF = 'Anchor Bolt Outside Column Flange'
+KEY_ANCHOR_ICF = 'Anchor Bolt.ICF'
+KEY_DISP_ANCHOR_ICF = 'Anchor Bolt Inside Column Flange'
+KEY_DISP_ANCHOR_GENERAL = 'General'
+KEY_DIA_ANCHOR_OCF = 'Anchor Bolt.OCF.Diameter'
+KEY_DIA_ANCHOR_ICF = 'Anchor Bolt.ICF.Diameter'
+KEY_TYP_ANCHOR = 'Anchor Bolt.Type'
+KEY_GRD_ANCHOR_OCF = 'Anchor Bolt.OCF.Grade'
+KEY_GRD_ANCHOR_ICF = 'Anchor Bolt.ICF.Grade'
+KEY_GRD_FOOTING = 'Footing.Grade'
+
+
+KEY_DP_WELD_FAB = 'Weld.Fab'
+KEY_DP_WELD_MATERIAL_G_O = 'Weld.Material_Grade_OverWrite'
+KEY_DP_WELD_TYPE = 'Weld.Type'
+
+KEY_DP_DETAILING_EDGE_TYPE = 'Detailing.Edge_type'
+KEY_DP_DETAILING_GAP = 'Detailing.Gap'
+KEY_DP_DETAILING_CORROSIVE_INFLUENCES = 'Detailing.Corrosive_Influences'
+KEY_DP_DETAILING_PACKING_PLATE  = 'Detailing.Packing_Plate'
+KEY_DP_DESIGN_METHOD = 'Design.Design_Method'
+
+###################
+# Value Keys
+###################
+
+RED_LIST = [KEY_SUPTNGSEC, KEY_SUPTDSEC, KEY_SECSIZE]
+VALUES_CONN_SPLICE = ['Coplanar Tension-Compression Flange', 'Coplanar Tension Flange', 'Coplanar Compression Flange']
+CONN_CFBW = 'Column Flange-Beam Web'
+CONN_CWBW = 'Column Web-Beam Web'
+VALUES_CONN_1 = [CONN_CFBW, CONN_CWBW]
+VALUES_CONN_2 = ['Beam-Beam']
+VALUES_CONN_3 = ['Flush End Plate', 'Extended Both Ways']
+VALUES_CONN = VALUES_CONN_1 + VALUES_CONN_2
+VALUES_ENDPLATE_TYPE = ['Flushed - Reversible Moment', 'Extended One Way - Irreversible Moment', 'Extended Both Ways - Reversible Moment']
+# VALUES_CONN_BP = ['Welded Column Base', 'Welded+Bolted Column Base', 'Moment Base Plate', 'Hollow/Tubular Column Base']
+VALUES_CONN_BP = ['Welded Column Base', 'Moment Base Plate', 'Hollow/Tubular Column Base']
+VALUES_LOCATION = ['Select Location','Long Leg', 'Short Leg', 'Web']
+VALUES_COVER_PLATE = ['Single-Cover', 'Double-Cover']
+
+# TODO: Every one is requested to use VALUES_ALL_CUSTOMIZED key instead of all other keys
+VALUES_ALL_CUSTOMIZED = ['All', 'Customized']
+VALUES_ENDPLATE_THICKNESS = ['All', 'Customized']
+VALUES_DIA_ANCHOR = ['All', 'Customized']
+VALUES_GRD_ANCHOR = ['All', 'Customized']
+VALUES_D = ['All', 'Customized']
+VALUES_GRD = ['All', 'Customized']
+VALUES_PLATETHK = ['All', 'Customized']
+VALUES_FLANGEPLATE_THICKNESS = ['All', 'Customized']
+VALUES_WEBPLATE_THICKNESS = ['All', 'Customized']
+VALUES_ANGLESEC= ['All', 'Customized']
+VALUES_TRUSSBOLT_THK = ['8', '10', '12', '14', '16']
+
+VALUES_MEMBERS = ['2', '3', '4', '5', '6', '7', '8']
+ALL_WELD_SIZES = [3, 4, 5, 6, 8, 10, 12, 14, 16]
+
+VALUES_TYP_ANCHOR = ['End Plate Type', 'IS 5624-Type A', 'IS 5624-Type B']
+VALUES_GRD_FOOTING = ['Select Grade', 'M10', 'M15', 'M20', 'M25', 'M30', 'M35', 'M40', 'M45', 'M50', 'M55']
+VALUES_TYP = [TYP_BEARING, TYP_FRICTION_GRIP]
+TYP_FRICTION_GRIP = 'Friction Grip Bolt'
+TYP_BEARING = 'Bearing Bolt'
+
+# VALUES_GRD_CUSTOMIZED = ['3.6', '4.6', '4.8', '5.6', '5.8', '6.8', '8.8', '9.8', '10.9', '12.9']
+VALUES_GRD_CUSTOMIZED = IS1367_Part3_2002.get_bolt_PC()
+
+# standard as per IS 1730:1989
+PLATE_THICKNESS_IS_1730_1989 = ['5', '6', '7', '8', '10', '12', '14', '16', '18', '20', '22', '25', '28', '32', '36', '40', '45', '50', '56', '63']
+# standard as per SAIL's product brochure
+PLATE_THICKNESS_SAIL = ['8', '10', '12', '14', '16', '18', '20', '22', '25', '28', '32', '36', '40', '45', '50', '56', '63', '75', '80', '90', '100',
+                        '110', '120']
+
+VALUES_PLATETHICKNESS_CUSTOMIZED = PLATE_THICKNESS_SAIL
+VALUES_PLATETHK_CUSTOMIZED = PLATE_THICKNESS_SAIL
+VALUES_ENDPLATE_THICKNESS_CUSTOMIZED = PLATE_THICKNESS_SAIL
+VALUES_COLUMN_ENDPLATE_THICKNESS_CUSTOMIZED = PLATE_THICKNESS_SAIL
+
+# TODO: delete the below list (commented) after verification
+# VALUES_PLATETHK_CUSTOMIZED = ['3', '4', '5', '6', '8', '10', '12', '14', '16', '18', '20', '22', '24','25', '26', '28', '30','32','36','40','45','50','56','63','80']
+# VALUES_ENDPLATE_THICKNESS_CUSTOMIZED = ['3', '4', '5', '6', '8', '10', '12', '14', '16', '18', '20', '22', '24', '26', '28', '30']
+# VALUES_COLUMN_ENDPLATE_THICKNESS_CUSTOMIZED = VALUES_ENDPLATE_THICKNESS_CUSTOMIZED[3:12] + ['25','28','32','36','40','45','50','56','63','80']
+
+
+
+VALUES_FLANGEPLATE_PREFERENCES = ['Outside','Outside + Inside']
+VALUES_LOCATION_1 = ['Long Leg', 'Short Leg']
+VALUES_LOCATION_2 = ["Web"]
+VALUES_SECTYPE = ['Select Type','Beams and Columns','Columns','Angles','Back to Back Angles','Star Angles','Channels','Back to back Channels']
+
+VALUES_CONNLOC_BOLT = ['Bolted','Web','Flange','Leg','Back to Back Web','Back to Back Angles','Star Angles']
+VALUES_CONNLOC_WELD = ['Welded','Web','Flange','Leg','Back to Back Web','Back to Back Angles','Star Angles']
+
+# Safe database call
+try:
+    VALUES_BEAMSEC = connectdb("Beams")
+    VALUES_SECBM = connectdb("Beams")
+    VALUES_COLSEC = connectdb("Columns")
+    VALUES_MATERIAL = connectdb("Material")
+    VALUES_PRIBM = connectdb("Beams")
+    VALUES_DIAM = connectdb("Bolt")
+except Exception as e:
+    print(f"Warning: Could not load bolt diameters from database: {e}")
+    VALUES_DIAM = []
+    VALUES_BEAMSEC = []
+    VALUES_SECBM = []
+    VALUES_COLSEC = []
+    VALUES_MATERIAL = []
+    VALUES_PRIBM = []
+
+VALUES_MATERIAL_SELECTED = "E 250 (Fe 410 W)A"
+# VALUES_DIAM = ['Select diameter','12','16','20','24','30','36']
+
+VALUES_IMAGE_PLATEGIRDER = [str(files("osdag_core.data.ResourceFiles.images").joinpath("ULPPS_PG.png")),
+    str(files("osdag_core.data.ResourceFiles.images").joinpath("ULFFS_PG.png")),
+    str(files("osdag_core.data.ResourceFiles.images").joinpath("CLPPS_PG.png")),
+    str(files("osdag_core.data.ResourceFiles.images").joinpath("CLFFS_PG.png")),
+    str(files("osdag_core.data.ResourceFiles.images").joinpath("CLPPSPB_PG.png"))]
+VALUES_IMG_TENSIONBOLTED = [str(files("osdag_core.data.ResourceFiles.images").joinpath("bA.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("bBBA.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("bSA.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("bC.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("bBBC.png"))]
+VALUES_IMG_TENSIONWELDED = [str(files("osdag_core.data.ResourceFiles.images").joinpath("wA.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("wBBA.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("wSA.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("wC.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("wBBC.png"))]
+VALUES_IMG_TENSIONBOLTED_DF01 = [str(files("osdag_core.data.ResourceFiles.images").joinpath("equaldp.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("bblequaldp.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("bbsequaldp.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("salequaldp.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("sasequaldp.png"))]
+VALUES_IMG_TENSIONBOLTED_DF02 = [str(files("osdag_core.data.ResourceFiles.images").joinpath("unequaldp.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("bblunequaldp.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("bbsunequaldp.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("salunequaldp.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("sasunequaldp.png"))]
+
+VALUES_IMG_TENSIONBOLTED_DF03 = [str(files("osdag_core.data.ResourceFiles.images").joinpath("Slope_Channel.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("Parallel_Channel.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("Slope_BBChannel.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("Parallel_BBChannel.png"))]
+
+VALUES_IMG_BEAM = [str(files("osdag_core.data.ResourceFiles.images").joinpath("Slope_Beam.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("Parallel_Beam.png"))]
+VALUES_IMG_HOLLOWSECTION = [str(files("osdag_core.data.ResourceFiles.images").joinpath("SHS.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("RHS.png")),str(files("osdag_core.data.ResourceFiles.images").joinpath("CHS.png"))]
+
+
+############################
+# Display Keys (Input Dock, Output Dock, Design preference, Design report)
+############################
+
+KEY_DISP_SHEAR_YLD = 'Shear Yielding Capacity (kN)'
+KEY_DISP_SHEAR_RUP = 'Shear Rupture Capacity (kN)'
+KEY_DISP_PLATE_BLK_SHEAR_SHEAR = 'Block Shear Capacity in Shear (kN)'
+KEY_DISP_PLATE_BLK_SHEAR_TENSION = 'Block Shear Capacity in Tension (kN)'
+KEY_DISP_SHEAR_CAPACITY = 'Shear Capacity (kN)'
+KEY_DISP_BEARING_LENGTH = 'Bearing Length'
+KEY_DISP_ALLOW_SHEAR = 'Allowable Shear Capacity (kN)'
+DISP_LOWSHEAR = 'Limited to low shear capacity'
+
+KEY_DISP_BLK_SHEAR = 'Block Shear Capacity (kN)'
+KEY_DISP_MOM_DEMAND = 'Moment Demand (kNm)'
+KEY_DISP_MOM_CAPACITY = 'Moment Capacity (kNm)'
+DISP_MIN_PITCH = 'Min. Pitch Distance (mm)'
+DISP_MAX_PITCH = 'Max. Pitch Distance (mm)'
+DISP_MIN_GAUGE = 'Min. Gauge Distance (mm)'
+DISP_MAX_GAUGE = 'Max. Gauge Distance (mm)'
+DISP_CS_GAUGE = 'Cross-centre Gauge Distance (mm)'
+DISP_MIN_EDGE = 'Min. Edge Distance (mm)'
+KEY_SPACING = "Spacing Check"
+DISP_MAX_EDGE = 'Max. Edge Distance (mm)'
+DISP_MIN_END = 'Min. End Distance (mm)'
+DISP_MAX_END = 'Max. End Distance (mm)'
+DISP_MIN_PLATE_HEIGHT = 'Min. Plate Height (mm)'
+DISP_MAX_PLATE_HEIGHT = 'Max. Plate Height (mm)'
+DISP_MIN_PLATE_LENGTH = 'Min. Plate Length (mm)'
+DISP_MAX_PLATE_WIDTH = 'Max. Plate Width (mm)'
+DISP_MIN_PLATE_WIDTH = 'Min. Plate Width (mm)'
+DISP_MIN_LEG_LENGTH = 'Min. Leg Length (mm)'
+DISP_MIN_CLEAT_HEIGHT = 'Min. Cleat Angle Height'
+DISP_MAX_CLEAT_HEIGHT = 'Max. Cleat Angle Height'
+DISP_MIN_CLEAT_THK = 'Min. Cleat Angle Thickness (mm)'
+DISP_MIN_WIDTH = 'Minimum Width (mm)'
+
+DISP_MIN_PLATE_THICK = 'Min. Plate Thickness (mm)'
+
+######### Minimun for Flange####
+DISP_MIN_FLANGE_PLATE_HEIGHT = 'Min. Flange Plate Width (mm)'
+DISP_MAX_FLANGE_PLATE_HEIGHT = 'Max. Flange Plate Width (mm)'
+DISP_MIN_FLANGE_PLATE_LENGTH = 'Min. Flange Plate Length (mm)'
+DISP_MIN_FLANGE_PLATE_THICK = 'Min. Flange Plate Thickness (mm)'
+
+######### Minimun for Flange####
+DISP_MIN_WEB_PLATE_HEIGHT = 'Min. Web Plate Height (mm)'
+DISP_MAX_WEB_PLATE_HEIGHT = 'Max. Web Plate Height (mm)'
+DISP_MIN_WEB_PLATE_LENGTH = 'Min. Web Plate Width (mm)'
+DISP_MIN_WEB_PLATE_THICK = 'Min. Web Plate Thickness (mm)'
+
+
+
+
+DISP_MIN_PLATE_INNERHEIGHT = 'Min. Inner Plate Width (mm)'
+DISP_MAX_PLATE_INNERHEIGHT = 'Max. Inner Plate Width (mm)'
+DISP_MIN_PLATE_INNERLENGTH = 'Min. Inner Plate Length (mm)'
+
+
+KEY_DISP_FU = 'Ultimate Strength, Fu (MPa)'
+KEY_DISP_FY = 'Yield Strength, Fy (MPa)'
+KEY_DISP_IR = 'Interaction Ratio'
+DISP_WELD_SIZE = 'Weld Size (mm)'
+DISP_MIN_WELD_SIZE = 'Min. Weld Size (mm)'
+DISP_MAX_WELD_SIZE = 'Max. Weld Size (mm)'
+DISP_THROAT = 'Throat Thickness (mm)'
+DISP_WEB_WELD_SIZE_REQ = 'Web Weld Size Required (mm)'
+
+DISP_WELD_STRENGTH = 'Weld Strength (N/mm)'
+DISP_WELD_STRENGTH_MPA = 'Weld Strength (N/mm2)'
+KEY_DISP_FY_20 = 'Yield Strength, Fy (MPa) (0-20mm)'
+KEY_DISP_FY_20_40 = 'Yield Strength, Fy (MPa) (20-40mm)'
+KEY_DISP_FY_40 = 'Yield Strength, Fy (MPa) (>40mm)'
+KEY_DISP_GUSSET = 'Gusset Plate'
+KEY_GUSSET = 'Thickness (mm)'
+
+
+DISP_TITLE_ANCHOR_BOLT = 'Anchor Bolt'
+DISP_TITLE_ANCHOR_BOLT_OUTSIDE_CF = 'Anchor Bolt - Outside Column Flange'
+DISP_TITLE_ANCHOR_BOLT = 'Anchor Bolt'
+DISP_TITLE_FOOTING = 'Pedestal/Footing'
+
+KEY_DISP_CONN = 'Connectivity *'
+
+KEY_DISP_ENDPLATE_TYPE = 'End Plate Type *'
+KEY_DISP_MEMBERS = 'No of Members'
+
+
+# VALUES_CONN_BP = ['Welded-Slab Base', 'Bolted-Slab Base', 'Gusseted Base Plate', 'Hollow Section']
+
+#lapjointbolted
+KEY_PLATE1_THICKNESS = "Plate1Thickness"
+KEY_PLATE2_THICKNESS = "Plate2Thickness" 
+KEY_PLATEC_THICKNESS = "PlatecThickness" 
+KEY_PLATE_WIDTH = "PlateWidth"
+KEY_DISP_PLATE1_THICKNESS = "Thickness of Plate-1 (mm) *"
+KEY_DISP_PLATE2_THICKNESS = "Thickness of Plate-2 (mm) *"
+KEY_DISP_PLATE_WIDTH = "Width of Plate (mm) *"
+KEY_TENSILE_FORCE = "TensileForce*"
+KEY_DISP_TENSILE_FORCE = "Tensile Force (kN) *"
+
+KEY_COVER_PLATE = "ButtJoint.CoverPlate"
+KEY_DISP_COVER_PLATE = "Cover Plate"
+
+KEY_DISP_LENGTH = 'Length (mm) *'
+KEY_DISP_LOCATION = 'Conn_Location *'
+KEY_DISP_LOCATION_STRUT = 'Connection *'
+KEY_DISP_MATERIAL = 'Material *'
+KEY_DISP_SUPTNGSEC = 'Supporting Section'
+KEY_DISP_SUPTNGSEC_REPORT = 'Supporting Section - Mechanical Properties'
+KEY_DISP_COLSEC = 'Column Section *'
+KEY_DISP_COLSEC_REPORT = 'Column Section'
+KEY_DISP_PRIBM = 'Primary Beam *'
+KEY_DISP_SUPTDSEC = 'Supported Section'
+KEY_DISP_SUPTDSEC_REPORT = 'Supported Section - Mechanical Properties'
+KEY_DISP_BEAMSEC = 'Beam Section *'
+KEY_DISP_BEAMSEC_REPORT = 'Beam Section'
+KEY_DISP_SECBM = 'Secondary Beam *'
+DISP_TITLE_FSL = 'Factored Loads'
+KEY_DISP_MOMENT = 'Bending Moment (kNm) *'
+KEY_DISP_MOMENT_ZZ = 'Bending Moment (z-z) (kNm)'
+KEY_DISP_MOMENT_YY = 'Bending Moment (y-y) (kNm)'
+
+KEY_DISP_TOP_ANGLE = 'Top Angle'
+
+KEY_DISP_DIA_ANCHOR = 'Diameter(mm) *'
+DISP_TITLE_BOLT = 'Bolt'
+DISP_TITLE_CRITICAL_BOLT = 'Critical Bolt Design'
+DISP_TITLE_CRITICAL_BOLT_SHEAR = 'Critical Bolt - Shear Design'
+DISP_TITLE_BOLT_CAPACITY = 'Bolt Capacity'
+
+DISP_TITLE_FLANGESPLICEPLATE = 'Flange Splice Plate '
+DISP_TITLE_FLANGESPLICEPLATE_OUTER = 'Outer Plate '
+DISP_TITLE_FLANGESPLICEPLATE_INNER = 'Inner Plate '
+KEY_DISP_SLENDER = 'Slenderness ratio'
+
+
+KEY_DISP_PLATETHK = 'Thickness (mm) *'
+KEY_DISP_DPPLATETHK = 'Endplate thickness, T (mm)'
+KEY_DISP_DPPLATETHK01 = 'Endplate thickness, Tp (mm)'
+
+DISP_TITLE_TENSION = 'Tension Capacity'
+KEY_DISP_FLANGESPLATE_PREFERENCES = 'Preference *'
+KEY_DISP_FLANGESPLATE_THICKNESS = 'Thickness (mm)'
+KEY_DISP_INNERFLANGESPLATE_THICKNESS = 'Thickness (mm)'
+
+DISP_TITLE_WELD = 'Weld'
+DISP_TITLE_WELD_CAPACITY = 'Weld Capacity'
+DISP_TITLE_END_CONNECTION = 'End Connection'
+DISP_TITLE_WELD_DETAILS = 'Weld Details'
+DISP_TITLE_CONN_DETAILS = 'Connection Details'
+
+
+KEY_DISP_FLANGE_CAPACITY= 'Capacity'
+KEY_DISP_FLANGE_PLATE_GAUGE ="Gauge Distance (mm)"
+KEY_DISP_FLANGE_SPACING = 'Spacing (mm)'
+KEY_DISP_END_DIST_FLANGE = 'End Distance'
+KEY_DISP_EDGEDIST_FLANGE= 'Edge Distance (mm)'
+KEY_DISP_FLANGE_PLATE_PITCH = 'Pitch Distance (mm)'
+
+KEY_DISP_FLANGE_PLATE_TEN_CAP ="Flange Plate Tension Capacity (kN)"
+DISP_TITLE_SECTION = 'Section Details'
+DISP_TITLE_TENSION_SECTION = 'Section Details'
+SECTION_CLASSIFICATION = "Section Classification"
+
+KEY_DISP_D = 'Diameter (mm) *'
+KEY_DISP_SHEAR = 'Shear Force (kN) *'
+KEY_DISP_SHEAR_YY = 'Shear Force (y-y) (kN)'
+KEY_DISP_SHEAR_ZZ = 'Shear Force (z-z) (kN)'
+KEY_DISP_AXIAL = 'Axial Force (kN)'
+KEY_DISP_AXIAL_STAR = 'Axial Force (kN)* '
+DISP_TITLE_PLATE = 'Plate'
+KEY_DISP_TYP = 'Type *'
+KEY_DISP_COF = 'Coefficient of friction'
+KEY_DISP_TYP_ANCHOR = 'Anchor Type *'
+KEY_DISP_GRD_ANCHOR = 'Property Class *'
+KEY_DISP_GRD_FOOTING = 'Grade*'
+KEY_DISP_GRD = 'Property Class *'
+KEY_DISP_BOLT_PRE_TENSIONING = 'Bolt Tension'
+
+KEY_DISP_MOMENT_MAJOR = ' - Major axis (M<sub>z-z</sub>)'
+KEY_DISP_MOMENT_MINOR = ' - Minor axis (M<sub>y-y</sub>)'
+
+# Applied load
+KEY_INTERACTION_RATIO ="Interaction Ratio"
+MIN_LOADS_REQUIRED ="Minimum Required Load"
+KEY_DISP_APPLIED_SHEAR_LOAD = 'Applied Shear Force (kN)'
+KEY_DISP_APPLIED_AXIAL_FORCE = 'Applied Axial Force (kN)'
+KEY_DISP_APPLIED_MOMENT_LOAD = 'Applied Moment (kNm)'
+KEY_DISP_AXIAL_FORCE_CON = 'Axial Load Considered (kN)'
+
+
+# capacity
+
+KEY_OUT_DISP_AXIAL_CAPACITY = "Axial Capacity Member (kN)"
+KEY_OUT_DISP_SHEAR_CAPACITY = "Shear Capacity Member (kN)"
+KEY_OUT_DISP_MOMENT_CAPACITY = "Moment Capacity Member (kNm)"
+KEY_OUT_DISP_PLASTIC_MOMENT_CAPACITY = 'Plastic Moment Capacity (kNm)'
+KEY_OUT_DISP_MOMENT_D_DEFORMATION= 'Moment Deformation Criteria (kNm)'
+KEY_OUT_DISP_SHEAR_CAPACITY_M = "Shear Capacity (kN)"
+
+
+KEY_OUT_DIA_ANCHOR = 'Anchor Bolt.Diameter'
+KEY_DISP_OUT_DIA_ANCHOR = 'Diameter (mm)'
+KEY_OUT_GRD_ANCHOR = 'Anchor Bolt.Grade'
+KEY_DISP_OUT_GRD_ANCHOR = 'Property Class'
+KEY_OUT_ANCHOR_BOLT_LENGTH = 'Anchor Bolt.Length'
+KEY_DISP_OUT_ANCHOR_BOLT_LENGTH = 'Anchor Length (mm)'
+KEY_OUT_ANCHOR_BOLT_NO = 'Anchor Bolt.No of Anchor Bolts'
+KEY_DISP_OUT_ANCHOR_BOLT_NO = 'No. of Anchors'
+
+
+KEY_OUT_DISP_ANCHOR_BOLT_SHEAR = 'Shear Capacity (kN)'
+KEY_OUT_DISP_ANCHOR_BOLT_BEARING = 'Bearing Capacity (kN)'
+KEY_OUT_DISP_ANCHOR_BOLT_CAPACITY = 'Bolt Capacity (kN)'
+KEY_OUT_DISP_ANCHOR_BOLT_COMBINED = 'Combined Capacity (kN)'
+KEY_OUT_DISP_ANCHOR_BOLT_TENSION_DEMAND = 'Tension Demand (kN)'
+KEY_OUT_DISP_ANCHOR_BOLT_TENSION = 'Tension Capacity (kN)'
+
+
+DISP_TITLE_ANCHOR_BOLT_UPLIFT = 'Anchor Bolt - Inside Column Flange'
+KEY_OUT_DIA_ANCHOR_UPLIFT = 'Anchor Bolt.Diameter_Uplift'
+KEY_DISP_OUT_DIA_ANCHOR_UPLIFT = 'Diameter (mm)'
+KEY_OUT_GRD_ANCHOR_UPLIFT = 'Anchor Bolt.Grade_Uplift'
+KEY_DISP_OUT_GRD_ANCHOR_UPLIFT = 'Property Class'
+KEY_OUT_ANCHOR_UPLIFT_BOLT_NO = 'Anchor Bolt.No of Anchor Bolts_Uplift'
+KEY_DISP_OUT_ANCHOR_UPLIFT_BOLT_NO = 'No. of Anchor Bolts'
+KEY_OUT_ANCHOR_BOLT_LENGTH_UPLIFT = 'Anchor Bolt.Length_Uplift'
+KEY_DISP_OUT_ANCHOR_BOLT_LENGTH_UPLIFT = 'Anchor Length (mm)'
+KEY_OUT_ANCHOR_BOLT_TENSION_UPLIFT = 'Anchor Bolt.Tension_Uplift'
+KEY_OUT_DISP_ANCHOR_BOLT_TENSION_UPLIFT = 'Tension Capacity (kN)'
+KEY_OUT_ANCHOR_BOLT_TENSION_DEMAND_UPLIFT = 'Anchor Bolt.Tension_Demand_Uplift'
+KEY_OUT_DISP_ANCHOR_BOLT_TENSION_DEMAND_UPLIFT = 'Tension Demand (kN)'
+
+DISP_TITLE_MEMBER_CAPACITY ="Member Capacity"
+KEY_DISP_MEMBER_CAPACITY = "Member Capacity"
+
+
+KEY_OUT_DISP_BASEPLATE_WIDTH = 'Width (mm)'
+KEY_OUT_DISP_BASEPLATE_LENGTH = 'Length (mm)'
+KEY_OUT_DISP_BASEPLATE_THICKNNESS = 'Thickness (mm)'
+DISP_TITLE_DETAILING = 'Detailing'
+DISP_TITLE_TYPICAL_DETAILING = 'Typical Detailing'
+DISP_TITLE_DETAILING_OCF = 'Detailing - Outside Column Flange'
+DISP_TITLE_DETAILING_ICF = 'Detailing - Inside Column Flange'
+
+KEY_OUT_DISP_DETAILING_NO_OF_ANCHOR_BOLT = 'Total No. of Anchor Bolts'
+
+KEY_OUT_DISP_DETAILING_PITCH_DISTANCE = 'Pitch Distance (mm)'
+KEY_IN_DISP_DETAILING_PITCH_DISTANCE = 'Pitch Distance (mm)'
+
+KEY_OUT_DISP_DETAILING_GAUGE_DISTANCE = 'Gauge Distance (mm)'
+KEY_IN_DISP_DETAILING_GAUGE_DISTANCE = 'Gauge Distance (mm)'
+KEY_OUT_DISP_DETAILING_CS_GAUGE_DISTANCE = 'Cross-centre Gauge (mm)'
+KEY_OUT_DETAILING_END_DISTANCE = 'Detailing.EndDistanceOut'
+KEY_IN_DETAILING_END_DISTANCE = 'Detailing.EndDistanceIn'
+
+KEY_OUT_DISP_DETAILING_END_DISTANCE = 'End Distance (mm)'
+KEY_IN_DISP_DETAILING_END_DISTANCE = 'End Distance (mm)'
+
+KEY_OUT_DISP_DETAILING_EDGE_DISTANCE = "Edge Distance (mm)"
+KEY_IN_DISP_DETAILING_EDGE_DISTANCE = "Edge Distance (mm)"
+
+KEY_OUT_DISP_DETAILING_PROJECTION = 'Effective Projection (mm)'
+DISP_TITLE_STIFFENER_PLATE = 'Stiffener Plate'
+DISP_OUT_TITLE_STIFFENER_PLATE = 'Stiffener.StiffenerPlate'
+DISP_OUT_TITLE_CHS_STIFFENER_PLATE = 'Stiffener.StiffenerPlate'
+DISP_TITLE_CONTINUITY_PLATE = 'Continuity Plate'
+DISP_TITLE_COL_WEB_STIFFENER_PLATE = 'Column Web Stiffener Plate'
+KEY_OUT_DISP_STIFFENER_PLATE_THICKNESS = 'Thickness (mm)'
+KEY_OUT_DISP_STIFFENER_PLATE_SHEAR_DEMAND = 'Shear Demand (kN)'
+KEY_OUT_DISP_STIFFENER_PLATE_SHEAR = 'Shear Capacity (kN)'
+KEY_OUT_DISP_STIFFENER_PLATE_MOMENT_DEMAND = 'Moment Demand (kNm)'
+KEY_OUT_DISP_STIFFENER_PLATE_MOMENT = 'Moment Capacity (kNm)'
+KEY_OUT_DISP_GUSSET_PLATE_MOMENT = 'Moment Capacity (kNm)'
+KEY_OUT_DISP_GUSSET_PLATE_MOMENT_DEMAND = 'Moment Demand (kNm)'
+KEY_OUT_DISP_GUSSET_PLATE_SHEAR = 'Shear Capacity (kN)'
+KEY_OUT_DISP_GUSSET_PLATE_THICKNESS = 'Thickness (mm)'
+KEY_OUT_DISP_GUSSET_PLATE_SHEAR_DEMAND = 'Shear Demand (kN)'
+DISP_TITLE_GUSSET_PLATE = 'Gusset Plate Details'
+KEY_DISP_FLANGE_PLATE_LENGTH = 'Length (mm)'
+KEY_DISP_FLANGE_PLATE_HEIGHT = 'Width (mm)'
+KEY_DISP_INNERFLANGESPLICEPLATE = "Inner Plate Details"
+DISP_TITLE_INNERFLANGESPLICEPLATE = 'Inner Flange splice plate'
+KEY_DISP_INNERFLANGE_PLATE_HEIGHT = 'Width (mm)'
+KEY_DISP_INNERFLANGE_PLATE_LENGTH = 'Length (mm)'
+
+
+
+
+# DISP_TITLE_GUSSET_PLATE = 'Gusset Plate'
+# KEY_OUT_GUSSET_PLATE_THICKNNESS = 'GussetPlate.Thickness'
+# KEY_OUT_DISP_GUSSET_PLATE_THICKNESS = 'Thickness (mm)'
+# KEY_OUT_GUSSET_PLATE_SHEAR_DEMAND = 'GussetPlate.Shear_Demand'
+# KEY_OUT_DISP_GUSSET_PLATE_SHEAR_DEMAND = 'Shear Demand (kN)'
+# KEY_OUT_GUSSET_PLATE_SHEAR = 'GussetPlate.Shear'
+# KEY_OUT_DISP_GUSSET_PLATE_SHEAR = 'Shear Capacity (kN)'
+# KEY_OUT_GUSSET_PLATE_MOMENT_DEMAND = 'GussetPlate.Moment_Demand'
+# KEY_OUT_DISP_GUSSET_PLATE_MOMENT_DEMAND = 'Moment Demand (kNm)'
+# KEY_OUT_GUSSET_PLATE_MOMENT = 'GussetPlate.Moment'
+# KEY_OUT_DISP_GUSSET_PLATE_MOMENT = 'Moment Capacity (kNm)'
+
+KEY_OUT_STIFFENER_PLATE_FLANGE = 'Stiffener_Plate.Column_flange'
+KEY_DISP_OUT_STIFFENER_PLATE_FLANGE = 'Stiffener Plate'
+DISP_TITLE_STIFFENER_PLATE_FLANGE = 'Stiffener Plate along Column flange'
+KEY_OUT_STIFFENER_PLATE_FLANGE_LENGTH = 'Stiffener_Plate_Flange.Length'
+KEY_OUT_DISP_STIFFENER_PLATE_FLANGE_LENGTH = 'Length (mm)'
+KEY_OUT_STIFFENER_PLATE_FLANGE_HEIGHT = 'Stiffener_Plate_Flange.Height'
+KEY_OUT_DISP_STIFFENER_PLATE_FLANGE_HEIGHT = 'Height (mm)'
+KEY_OUT_STIFFENER_PLATE_FLANGE_THICKNNESS = 'Stiffener_Plate_Flange.Thickness'
+KEY_OUT_DISP_STIFFENER_PLATE_FLANGE_THICKNESS = 'Thickness (mm)'
+KEY_OUT_STIFFENER_PLATE_FLANGE_SHEAR_DEMAND = 'Stiffener_Plate_Flange.Shear_Demand'
+KEY_OUT_DISP_STIFFENER_PLATE_FLANGE_SHEAR_DEMAND = 'Shear Demand (kN)'
+KEY_OUT_STIFFENER_PLATE_FLANGE_SHEAR = 'Stiffener_Plate_Flange.Shear'
+KEY_OUT_DISP_STIFFENER_PLATE_FLANGE_SHEAR = 'Shear Capacity (kN)'
+KEY_OUT_STIFFENER_PLATE_FLANGE_MOMENT_DEMAND = 'Stiffener_Plate_Flange.Moment_Demand'
+KEY_OUT_DISP_STIFFENER_PLATE_FLANGE_MOMENT_DEMAND = 'Moment Demand (kNm)'
+KEY_OUT_STIFFENER_PLATE_FLANGE_MOMENT = 'Stiffener_Plate_Flange.Moment'
+KEY_OUT_DISP_STIFFENER_PLATE_FLANGE_MOMENT = 'Moment Capacity (kNm)'
+
+KEY_OUT_STIFFENER_PLATE_ALONG_WEB = 'Stiffener_Plate.Along_Column_web'
+KEY_DISP_OUT_STIFFENER_PLATE_ALONG_WEB = 'Stiffener Plate'
+DISP_TITLE_STIFFENER_PLATE_ALONG_WEB = 'Stiffener Plate along Column web'
+KEY_OUT_STIFFENER_PLATE_ALONG_WEB_LENGTH = 'Stiffener_Plate_along_Web.Length'
+KEY_OUT_DISP_STIFFENER_PLATE_ALONG_WEB_LENGTH = 'Length (mm)'
+KEY_OUT_STIFFENER_PLATE_ALONG_WEB_HEIGHT = 'Stiffener_Plate_along_Web.Height'
+KEY_OUT_DISP_STIFFENER_PLATE_ALONG_WEB_HEIGHT = 'Height (mm)'
+KEY_OUT_STIFFENER_PLATE_ALONG_WEB_THICKNNESS = 'Stiffener_Plate_along_Web.Thickness'
+KEY_OUT_DISP_STIFFENER_PLATE_ALONG_WEB_THICKNESS = 'Thickness (mm)'
+KEY_OUT_STIFFENER_PLATE_ALONG_WEB_SHEAR_DEMAND = 'Stiffener_Plate_along_Web.Shear_Demand'
+KEY_OUT_DISP_STIFFENER_PLATE_ALONG_WEB_SHEAR_DEMAND = 'Shear Demand (kN)'
+KEY_OUT_STIFFENER_PLATE_ALONG_WEB_SHEAR = 'Stiffener_Plate_along_Web.Shear'
+KEY_OUT_DISP_STIFFENER_PLATE_ALONG_WEB_SHEAR = 'Shear Capacity (kN)'
+KEY_OUT_STIFFENER_PLATE_ALONG_WEB_MOMENT_DEMAND = 'Stiffener_Plate_along_Web.Moment_Demand'
+KEY_OUT_DISP_STIFFENER_PLATE_ALONG_WEB_MOMENT_DEMAND = 'Moment Demand (kNm)'
+KEY_OUT_STIFFENER_PLATE_ALONG_WEB_MOMENT = 'Stiffener_Plate_along_Web.Moment'
+KEY_OUT_DISP_STIFFENER_PLATE_ALONG_WEB_MOMENT = 'Moment Capacity (kNm)'
+
+KEY_OUT_STIFFENER_PLATE_ACROSS_WEB = 'Stiffener_Plate.Across_Column_web'
+KEY_DISP_OUT_STIFFENER_PLATE_ACROSS_WEB = 'Stiffener Plate'
+DISP_TITLE_STIFFENER_PLATE_ACROSS_WEB = 'Stiffener Plate across Column web'
+KEY_OUT_STIFFENER_PLATE_ACROSS_WEB_LENGTH = 'Stiffener_Plate_across_Web.Length'
+KEY_OUT_DISP_STIFFENER_PLATE_ACROSS_WEB_LENGTH = 'Length (mm)'
+KEY_OUT_STIFFENER_PLATE_ACROSS_WEB_HEIGHT = 'Stiffener_Plate_across_Web.Height'
+KEY_OUT_DISP_STIFFENER_PLATE_ACROSS_WEB_HEIGHT = 'Height (mm)'
+KEY_OUT_STIFFENER_PLATE_ACROSS_WEB_THICKNNESS = 'Stiffener_Plate_across_Web.Thickness'
+KEY_OUT_DISP_STIFFENER_PLATE_ACROSS_WEB_THICKNESS = 'Thickness (mm)'
+KEY_OUT_STIFFENER_PLATE_ACROSS_WEB_SHEAR_DEMAND = 'Stiffener_Plate_across_Web.Shear_Demand'
+KEY_OUT_DISP_STIFFENER_PLATE_ACROSS_WEB_SHEAR_DEMAND = 'Shear Demand (kN)'
+KEY_OUT_DISP_STIFFENER_PLATE_SHEAR_DEMAND = 'Shear Demand (kN)'
+KEY_OUT_STIFFENER_PLATE_ACROSS_WEB_SHEAR = 'Stiffener_Plate_across_Web.Shear'
+KEY_OUT_DISP_STIFFENER_PLATE_ACROSS_WEB_SHEAR = 'Shear Capacity (kN)'
+KEY_OUT_STIFFENER_PLATE_ACROSS_WEB_MOMENT_DEMAND = 'Stiffener_Plate_across_Web.Moment_Demand'
+KEY_OUT_DISP_STIFFENER_PLATE_ACROSS_WEB_MOMENT_DEMAND = 'Moment Demand (kNm)'
+KEY_OUT_STIFFENER_PLATE_ACROSS_WEB_MOMENT = 'Stiffener_Plate_across_Web.Moment'
+KEY_OUT_DISP_STIFFENER_PLATE_ACROSS_WEB_MOMENT = 'Moment Capacity (kNm)'
+
+
+KEY_OUT_SHEAR_KEY = 'Shear Key.Along_both_direction'
+KEY_OUT_SHEAR_KEY_TYPICAL_DETAILS = 'Shear Key.TypicalDetails'
+KEY_DISP_OUT_SHEAR_KEY = 'Shear Key'
+KEY_DISP_OUT_SHEAR_KEY_TYPICAL_DETAILS = 'Typical Details'
+DISP_TITLE_SHEAR_KEY = 'Shear Design'
+KEY_OUT_SHEAR_RESISTANCE = 'ShearDesign.Resistance'
+KEY_OUT_DISP_SHEAR_RESISTANCE = 'Shear Resistance (kN)'
+KEY_OUT_SHEAR_KEY_REQ = 'Shear_key.Required'
+KEY_OUT_DISP_SHEAR_KEY_REQ = 'Key Required?'
+KEY_OUT_SHEAR_KEY_LENGTH = 'Shear_key.Length'
+KEY_OUT_DISP_SHEAR_KEY_LENGTH = 'Length (mm)'
+KEY_OUT_SHEAR_KEY_DEPTH = 'Shear_key.Depth'
+KEY_OUT_DISP_SHEAR_KEY_DEPTH = 'Depth (mm)'
+KEY_OUT_SHEAR_KEY_THICKNESS = 'Shear_key.Thickness'
+KEY_OUT_DISP_SHEAR_KEY_THICKNESS = 'Thickness (mm)'
+KEY_OUT_SHEAR_KEY_STRESS = 'Shear_key.Stress'
+KEY_OUT_DISP_SHEAR_KEY_STRESS = 'Bearing Stress (N/mm2)'
+KEY_OUT_SHEAR_KEY_MOM_DEMAND = 'Shear_key.MomentDemand'
+KEY_OUT_DISP_SHEAR_KEY_MOM_DEMAND = 'Moment Demand (kNm)'
+KEY_OUT_SHEAR_KEY_MOM_CAPACITY = 'Shear_key.MomentCapacity'
+KEY_OUT_DISP_SHEAR_KEY_MOM_CAPACITY = 'Moment Capacity (kNm)'
+
 #
-# from Connections.Shear.Finplate.beamWebBeamWebConnectivity import BeamWebBeamWeb as finBeamWebBeamWeb
-# from Connections.Shear.Endplate.beamWebBeamWebConnectivity import BeamWebBeamWeb as endBeamWebBeamWeb
-# from Connections.Shear.cleatAngle.beamWebBeamWebConnectivity import BeamWebBeamWeb as cleatBeamWebBeamWeb
-#
-# from Connections.Shear.Finplate.colFlangeBeamWebConnectivity import ColFlangeBeamWeb as finColFlangeBeamWeb
-# from Connections.Shear.Endplate.colFlangeBeamWebConnectivity import ColFlangeBeamWeb as endColFlangeBeamWeb
-# from Connections.Shear.cleatAngle.colFlangeBeamWebConnectivity import ColFlangeBeamWeb as cleatColFlangeBeamWeb
-# from Connections.Shear.SeatedAngle.CAD_col_flange_beam_web_connectivity import ColFlangeBeamWeb as seatColFlangeBeamWeb
-
-# from Connections.Shear.Finplate.finPlateCalc import finConn
-# from Connections.Shear.Endplate.endPlateCalc import end_connection
-# from Connections.Shear.cleatAngle.cleatCalculation import cleat_connection
-# from Connections.Shear.SeatedAngle.seat_angle_calc import SeatAngleCalculation
-# from Connections.Component.filletweld import FilletWeld
-# from Connections.Component.plate import Plate
-# from Connections.Component.bolt import Bolt
-# from Connections.Component.nut import Nut
-# from Connections.Component.notch import Notch
-# from Connections.Component.ISection import ISection
-# from Connections.Component.angle import Angle
-# from Connections.Shear.Finplate.nutBoltPlacement import NutBoltArray as finNutBoltArray
-# from Connections.Shear.Endplate.nutBoltPlacement import NutBoltArray as endNutBoltArray
-# from Connections.Shear.cleatAngle.nutBoltPlacement import NutBoltArray as cleatNutBoltArray
-# from Connections.Shear.SeatedAngle.CAD_nut_bolt_placement import NutBoltArray as seatNutBoltArray
-# from utilities import osdag_display_shape
-
-from OCC.Core.gp import (gp_Vec, gp_Pnt, gp_Trsf, gp_OX, gp_OY,
-                         gp_OZ, gp_XYZ, gp_Ax2, gp_Dir, gp_GTrsf, gp_Mat)
-from OCC.Core.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge,
-                                     BRepBuilderAPI_MakeVertex,
-                                     BRepBuilderAPI_MakeWire,
-                                     BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge2d,
-                                     BRepBuilderAPI_Transform)
-
-import OCC.Core.V3d
-from OCC.Core.Quantity import *
-from OCC.Core.Graphic3d import *
-from OCC.Core.Quantity import Quantity_NOC_GRAY25 as GRAY
-# from OCC.Core.AIS import Erase
-# from OCC.Display.OCCViewer import V3d_XposYnegZneg
-from OCC.Core.TNaming import tnaming
-import multiprocessing
-
-# from Connections.Shear.Finplate.drawing_2D import FinCommonData
-# from Connections.Shear.Endplate.drawing_2D import EndCommonData
-# from Connections.Shear.cleatAngle.drawing2D import cleatCommonData
-# from Connections.Shear.SeatedAngle.drawing_2D import SeatCommonData
-#
-# from Connections.Shear.Finplate.reportGenerator import save_html as fin_save_html
-# from Connections.Shear.Endplate.reportGenerator import save_html as end_save_html
-# from Connections.Shear.cleatAngle.reportGenerator import save_html as cleat_save_html
-# from Connections.Shear.SeatedAngle.design_report_generator import ReportGenerator
-# ----------------------------------------- from reportGenerator import save_html
+# DISP_TITLE_STIFFENER_PLATE = 'Stiffener Plate'
+# KEY_OUT_STIFFENER_PLATE_THICKNNESS = 'StiffenerPlate.Thickness'
+# KEY_OUT_DISP_STIFFENER_PLATE_THICKNESS = 'Thickness (mm)'
+# KEY_OUT_STIFFENER_PLATE_SHEAR_DEMAND = 'StiffenerPlate.Shear_Demand'
+# KEY_OUT_DISP_STIFFENER_PLATE_SHEAR_DEMAND = 'Shear Demand (kN)'
+# KEY_OUT_STIFFENER_PLATE_SHEAR = 'StiffenerPlate.Shear'
+# KEY_OUT_DISP_STIFFENER_PLATE_SHEAR = 'Shear Capacity (kN)'
+# KEY_OUT_STIFFENER_PLATE_MOMENT_DEMAND = 'StiffenerPlate.Moment_Demand'
+# KEY_OUT_DISP_STIFFENER_PLATE_MOMENT_DEMAND = 'Moment Demand (kNm)'
+# KEY_OUT_STIFFENER_PLATE_MOMENT = 'StiffenerPlate.Moment'
+# KEY_OUT_DISP_STIFFENER_PLATE_MOMENT = 'Moment Capacity (kNm)'
 
 
-class CommonDesignLogic(object):
-    # --------------------------------------------- def __init__(self, **kwargs):
-    # -------------------------------------------- self.uiObj = kwargs[uiObj]
-    # ------------------------------ self.dictbeamdata = kwargs[dictbeamdata]
-    # -------------------------------- self.dictcoldata = kwargs[dictcoldata]
-    # ------------------------------------------------ self.loc = kwargs[loc]
-    # ------------------------------------ self.component = kwargs[component]
-    # ------------------------------------------ self.bolt_R = kwargs[bolt_R]
-    # ------------------------------------------ self.bolt_T = kwargs[bolt_T]
-    # ---------------------------------------- self.bolt_Ht = kwargs[bolt_Ht]
-    # -------------------------------------------- self.nut_T = kwargs[nut_T]
-    # ----------------------------------------- self.display =kwargs[display]
-    # --------------------------- self.resultObj = self.call_finCalculation()
-    # ------------------------------------------- self.connectivityObj = None
+KEY_DP_ANCHOR_BOLT_DESIGNATION_OCF = 'DesignPreferences.Anchor_Bolt.OCF.Designation'
+KEY_DP_ANCHOR_BOLT_DESIGNATION_ICF = 'DesignPreferences.Anchor_Bolt.ICF.Designation'
+KEY_DP_ANCHOR_BOLT_TYPE_OCF = 'DesignPreferences.Anchor_Bolt.OCF.Type'
+KEY_DP_ANCHOR_BOLT_TYPE_ICF = 'DesignPreferences.Anchor_Bolt.ICF.Type'
+KEY_DISP_DP_ANCHOR_BOLT_TYPE = 'Anchor Bolt Type'
+KEY_DP_ANCHOR_BOLT_HOLE_TYPE_OCF = 'DesignPreferences.Anchor_Bolt.OCF.Bolt_Hole_Type'
+KEY_DP_ANCHOR_BOLT_HOLE_TYPE_ICF = 'DesignPreferences.Anchor_Bolt.ICF.Bolt_Hole_Type'
+KEY_DISP_DP_ANCHOR_BOLT_HOLE_TYPE = 'Anchor Bolt Hole Type'
+KEY_DISP_REPORT_HOLE_TYPE = 'Hole Type'
+KEY_DP_ANCHOR_BOLT_MATERIAL_G_O_OCF = 'DesignPreferences.Anchor_Bolt.OCF.Material_Grade_OverWrite'
+KEY_DP_ANCHOR_BOLT_MATERIAL_G_O_ICF = 'DesignPreferences.Anchor_Bolt.ICF.Material_Grade_OverWrite'
+KEY_DISP_DP_ANCHOR_BOLT_MATERIAL_G_O = 'Material Grade, Fu (MPa)'
+KEY_DISP_DP_ANCHOR_BOLT_DESIGN_PARA = 'HSFG bolt design parameters:'
+KEY_DP_ANCHOR_BOLT_SLIP_FACTOR = 'DesignPreferences.Anchor_Bolt.Slip_Factor'
+KEY_DISP_DP_ANCHOR_BOLT_SLIP_FACTOR = 'Slip factor (µ_f)'
+KEY_DP_ANCHOR_BOLT_GALVANIZED_OCF = 'DesignPreferences.Anchor_Bolt.OCF.Galvanized'
+KEY_DP_ANCHOR_BOLT_GALVANIZED_ICF = 'DesignPreferences.Anchor_Bolt.ICF.Galvanized'
+KEY_DISP_DP_ANCHOR_BOLT_GALVANIZED = 'Anchor Bolt Galvanized?'
+KEY_DP_ANCHOR_BOLT_LENGTH_OCF = 'DesignPreferences.Anchor_Bolt.OCF.Length'
+KEY_DP_ANCHOR_BOLT_LENGTH_ICF = 'DesignPreferences.Anchor_Bolt.ICF.Length'
+KEY_DISP_DP_ANCHOR_BOLT_LENGTH = 'Total Length (mm)'
+KEY_DP_ANCHOR_BOLT_FRICTION = 'DesignPreferences.Anchor_Bolt.Friction_coefficient'
+KEY_DISP_DP_ANCHOR_BOLT_FRICTION = 'Friction Coefficient <br>(between concrete and anchor bolt)'
 
 
-    def __init__(self, display, folder, connection, mainmodule):
+KEY_DISP_DP_BOLT_TYPE = 'Bolt tensioning type'
 
-        self.display = display
-        self.mainmodule = mainmodule
-        self.connection = connection
-        self.connectivityObj = None
-        self.CPObj = None
-        self.folder = folder
+###################################
+# Key for Storing Shear sub-key of Load
 
 
-    def get_notch_ht(self, PB_T, PB_R1, SB_T, SB_R1):
-        """
-        Args:
-            PB_T: (Float)Flange thickness of Primary beam
-            PB_R1: (Float) Root radius of Primary beam
-            SB_T: (Float) Flange thickness of Secondary beam
-            SB_R1: (Float) Root radius of Secondary beam
-
-        Returns: (Float)Height of the coping based on maximum of sectional properties of Primary beam and Secondary beam
-
-        """
-        notch_ht = max([PB_T, SB_T]) + max([PB_R1, SB_R1]) + max([(PB_T/2), (SB_T/2),10])
-
-        return notch_ht
-
-    def boltHeadThick_Calculation(self, boltDia):
-        '''
-        This routine takes the bolt diameter and return bolt head thickness as per IS:3757(1989) and IS:1364 (PART-1) : 2002
+KEY_SHEAR_BP = 'Load.Shear_BP'
+KEY_DISP_SHEAR_BP = 'Shear Force (kN) *'
+KEY_SHEAR_MAJOR = 'Load.Shear.Major'
+KEY_DISP_SHEAR_MAJOR = ' - Along major axis (z-z)'
+KEY_SHEAR_MINOR = 'Load.Shear.Minor'
+KEY_DISP_SHEAR_MINOR = ' - Along minor axis (y-y)'
 
 
-       bolt Head Dia
-        <-------->
-        __________
-        |        | | T = Thickness
-        |________| |
-           |  |
-           |  |
-           |  |
+###################################
+# Key for Storing Axial sub-key of Load
+KEY_AXIAL_BP = 'Load.Axial_Compression'
+KEY_DISP_AXIAL_BP = 'Axial Compression (kN) *'
+KEY_AXIAL_TENSION_BP = 'Load.Axial_Tension'
+KEY_DISP_AXIAL_TENSION_BP = 'Axial Tension/Uplift (kN)'
+KEY_DISP_DP_BOLT_HOLE_TYPE = 'Hole Type'
 
-        Note: The head thickness for diameter 72 has been assumed and not taken from the IS code
-
-        '''
-        boltHeadThick = {5: 3.5, 6: 4, 8: 5.3, 10: 6.4, 12: 7.5, 14: 8.8, 16: 10, 18: 11.5, 20: 12.5, 22: 14, 24: 15,
-                         27: 17, 30: 18.7, 33: 21, 36: 22.5, 39: 25, 42: 26, 45: 28, 48: 30, 52: 33, 56: 35, 60: 38, 64: 40, 72: 45}
-        return boltHeadThick[boltDia]
-
-    def boltHeadDia_Calculation(self, boltDia):
-        '''
-        This routine takes the bolt diameter and return bolt head diameter as per IS:3757(1989) and IS:1364 (PART-1) : 2002
-
-       bolt Head Dia
-        <-------->
-        __________
-        |        |
-        |________|
-           |  |
-           |  |
-           |  |
-
-        '''
-        boltHeadDia = {5: 8, 6: 10, 8: 13, 10: 16, 12: 18, 14: 21, 16: 24, 18: 27, 20: 30, 22: 34, 24: 36, 27: 41,
-                       30: 46, 33: 50, 36: 55, 39: 60, 42: 65, 45: 70, 48: 75, 52: 80, 56: 85, 60: 90, 64: 95, 72: 110}
-        return boltHeadDia[boltDia]
-
-    def boltLength_Calculation(self, boltDia):
-        '''
-        This routine takes the bolt diameter and return bolt head diameter as per IS:3757(1985)
-
-       bolt Head Dia
-        <-------->
-        __________  ______
-        |        |    |
-        |________|    |
-           |  |       |
-           |  |       |
-           |  |       |
-           |  |       |
-           |  |       |  l= length
-           |  |       |
-           |  |       |
-           |  |       |
-           |__|    ___|__
-
-        '''
-        # boltHeadDia = {5: 40, 6: 40, 8: 40, 10: 40, 12: 40, 16: 50, 20: 50, 22: 50, 24: 50, 27: 60, 30: 65, 36: 75}
-
-        '''
-        This routine takes the bolt diameter and return bolt head diameter as per IS:1364 (PART-1) : 2002
-
-        __________ 
-        |        |  
-        |________|  ______
-           |  |       |
-           |  |       |
-           |  |       |
-           |  |       |
-           |  |       |  l= length
-           |  |       |
-           |  |       |
-           |  |       |
-           |__|    ___|__
-
-        '''
-        boltLength = {5: 25, 6: 30, 8: 40, 10: 45, 12: 50, 14: 60, 16: 65, 18: 70, 20: 80, 22: 90, 24: 90, 27: 100,
-                      30: 110, 33: 130, 36: 140, 39: 150, 42: 180, 45: 200, 48: 220, 52: 240, 56: 260, 60: 280, 64: 300, 72: 320}
-
-        return boltLength[boltDia]
-
-    @staticmethod
-    def nutThick_Calculation(boltDia):
-        '''
-        Returns the thickness of the hexagon nut (Grade A and B) depending upon the nut diameter as per IS1364-3(2002) - Table 1
-
-        Note: The nut thk for 72 diameter is not available in IS code, however an approximated value is assumed.
-              72 mm dia bolt is used in the base plate module.
-        '''
-
-        # nutDia = {5: 5, 6: 5.65, 8: 7.15, 10: 8.75, 12: 11.3, 16: 15, 20: 17.95, 22: 19.0, 24: 21.25, 27: 23, 30: 25.35,
-        #           36: 30.65}
-
-        '''
-        Returns the thickness of the nut depending upon the nut diameter as per IS1364-3(2002)
-        '''
-        nutDia = {5: 4.7, 6: 5.2, 8: 6.8, 10: 8.4, 12: 10.8, 14: 12.8, 16: 14.8, 18: 15.8, 20: 18.0, 22: 19.4, 24: 21.5, 27: 23.8, 30: 25.6,
-                  33: 28.7, 36: 31, 39: 33.4, 42: 34.0, 45: 36, 48: 38.0, 52: 42, 56: 45.0, 60: 48, 64: 51.0, 72: 60.0}
-
-        return nutDia[boltDia]
+# KEY_PC = 'Bolt.PC'
+KEY_DISP_PC = 'Property Class *'
+KEY_DISP_DP_BOLT_MATERIAL_G_O = 'Material grade overwrite (MPa) Fu'
+KEY_DISP_DP_BOLT_DESIGN_PARA = 'HSFG Bolt:'
 
 
-    def create3DBeamWebBeamWeb(self):
-        '''self,uiObj,resultObj,dictbeamdata,dictcoldata):
-        creating 3d cad model with beam web beam web
+KEY_DISP_DP_BOLT_SLIP_FACTOR = 'Slip Factor, (mu<sub>f</sub>)'
+KEY_DISP_DP_BOLT_SLIP_FACTOR_REPORT = r'Slip Factor, ($\mu_{f}$)'
+KEY_DISP_DP_BOLT_FU = 'Bolt Ultimate Strength (N/mm2)'
+KEY_DISP_DP_BOLT_FY = 'Bolt Yield Strength (N/mm2)'
+KEY_DISP_GAMMA_M0 = "Governed by Yielding"
+KEY_DISP_GAMMA_M1 = "Governed by Ultimate Stress"
+KEY_DISP_GAMMA_MB = "Connection Bolts - Bearing Type"
+KEY_DISP_GAMMA_MF = "Connection Bolts - Friction Type"
+KEY_DISP_GAMMA_MW = "Connection Weld"
 
-        '''
 
-        A = self.module_class
+KEY_DISP_DP_WELD_TYPE = 'Weld Type'
+KEY_DISP_BEAM_FLANGE_WELD_TYPE = 'Beam Flange to End Plate'
+KEY_DISP_BEAM_WEB_WELD_TYPE = 'Beam Web to End Plate'
+KEY_DISP_STIFFENER_WELD_TYPE = "Stiffener"
+KEY_DISP_CONTINUITY_PLATE_WELD_TYPE = "Continuity Plate"
+KEY_DP_WELD_TYPE_FILLET = 'Fillet Weld'
+KEY_DP_WELD_TYPE_GROOVE = 'Groove Weld'
+KEY_DP_WELD_TYPE_VALUES = [KEY_DP_WELD_TYPE_FILLET, KEY_DP_WELD_TYPE_GROOVE]
 
-        if self.connection == KEY_DISP_FINPLATE or self.connection == 'FinPlateConnection':
-            # A = self.module_class()
-            # A = FinPlateConnection()
-            plate = Plate(L=A.plate.height, W=A.plate.length, T=A.plate.thickness_provided)
-            Fweld1 = FilletWeld(L=A.weld.length, b=A.weld.size, h=A.weld.size)
+KEY_DISP_DP_WELD_FAB = 'Type of Weld Fabrication'
+KEY_DP_FAB_SHOP = 'Shop Weld'
+KEY_DP_FAB_FIELD = 'Field weld'
+KEY_DP_WELD_FAB_VALUES = [KEY_DP_FAB_SHOP, KEY_DP_FAB_FIELD]
 
-        elif self.connection == KEY_DISP_CLEATANGLE:
-            # A = CleatAngleConnection()
-            angle = Angle(L=A.cleat.height, A=A.cleat.leg_a_length, B=A.cleat.leg_b_length, T=A.cleat.thickness,
-                          R1=A.cleat.root_radius, R2=A.cleat.toe_radius)
+KEY_DISP_DP_WELD_MATERIAL_G_O = 'Material Grade Overwrite, Fu (MPa)'
+KEY_DISP_DP_WELD_MATERIAL_G_O_REPORT = 'Material Grade Overwrite, $F_{u}$ (MPa)'
+KEY_DP_DESIGN_BASE_PLATE = 'DesignPreferences.Design.Base_Plate'
+# KEY_DISP_DP_DETAILING_EDGE_TYPE = 'Type of edge'
+KEY_DISP_DP_DETAILING_EDGE_TYPE = 'Edge Preparation Method'  # added by Danish Ansari
 
-        elif self.connection == KEY_DISP_ENDPLATE or self.connection == 'EndPlateConnection':
-            # A = self.module_class()
-            print(f"CAD - EndPlate setup in create3DBeamWebBeamWeb")
-            plate = Plate(L=A.plate.height, W=A.plate.width, T=A.plate.thickness_provided)
-            Fweld1 = FilletWeld(L=A.plate.height, b=A.weld.size, h=A.weld.size)
+DISP_TITLE_INTERMITTENT = 'Intermittent Connection'
+DISP_TITLE_BOLTD = 'Bolt Details'
+DISP_TITLE_BOLTDS = 'Bolt Design'
+DISP_TITLE_PLATED = 'Plate Details'
 
+KEY_DISP_DP_DETAILING_GAP = 'Gap Between Beam and <br>Support (mm)'
+KEY_DISP_DP_DETAILING_GAP_BEAM = 'Gap Between Beams (mm)'
+KEY_DISP_DP_DETAILING_GAP_COL = 'Gap Between Columns (mm)'
+KEY_DISP_DP_DETAILING_CORROSIVE_INFLUENCES = 'Are the Members Exposed to <br> Corrosive Influences?'
+KEY_DISP_DP_DETAILING_CORROSIVE_INFLUENCES_BEAM = 'Are the Members Exposed to Corrosive Influences?'
+KEY_DISP_CORR_INFLUENCES = 'Members exposed to corrosive influences?'
+KEY_DISP_DP_DESIGN_METHOD = 'Design Method'
+KEY_DISP_DP_DETAILING_PACKING_PLATE = 'Packing Plate'
+
+KEY_DISP_DP_DESIGN_BASE_PLATE = 'Base Plate Analysis'
+KEY_DISP_GAP = 'Gap Between Members (mm)'
+
+
+KEY_DISP_MECH_PROP = 'Mechanical Properties'
+KEY_DISP_DIMENSIONS = 'Dimensions'
+KEY_DISP_DEPTH = 'Depth, D (mm)*'
+KEY_DISP_WIDTH = 'Width, B (mm)*'
+KEY_DISP_THICKNESS = 'Thickness, T (mm)*'
+KEY_DISP_NB = 'Nominal Bore, NB (mm)*'
+KEY_DISP_OD = 'Outside Diameter, OD (mm)*'
+KEY_DISP_FLANGE_W = 'Flange Width, B (mm)*'
+KEY_DISP_FLANGE_T = 'Flange Thickness, T (mm)*'
+KEY_DISP_WEB_HEIGHT = 'Web Height, D (mm*)'
+KEY_DISP_WEB_T = 'Web Thickness, t (mm)*'
+KEY_DISP_FLANGE_S = 'Flange Slope, α (deg.)*'
+KEY_DISP_FLANGE_S_REPORT = 'Flange Slope'
+KEY_DISP_ROOT_R = 'Root Radius, R1 (mm)*'
+KEY_DISP_TOE_R = 'Toe Radius, R2 (mm)*'
+KEY_DISP_TYPE = 'Type'
+KEY_DISP_MOD_OF_ELAST = 'Modulus of Elasticity, E (GPa)'
+KEY_DISP_MOD_OF_RIGID = 'Modulus of Rigidity, G (GPa)'
+KEY_DISP_SEC_PROP = 'Section Properties'
+KEY_DISP_MASS = 'Mass, M (Kg/m)'
+KEY_DISP_Cz = 'Cz (cm)'
+KEY_DISP_Cy = 'Cy (cm)'
+KEY_DISP_AREA = 'Sectional Area, a (cm<sup>2</sup>)'
+KEY_DISP_MOA = '2nd Moment of Area, I (cm<sup>4</sup>/m)*'
+KEY_DISP_MOA_IZ = '2nd Moment of Area, I<sub>z</sub> (cm<sup>4</sup>)'
+KEY_DISP_MOA_IY = '2nd Moment of Area, I<sub>y</sub> (cm<sup>4</sup>)'
+KEY_DISP_MOA_IU = '2nd Moment of Area, I<sub>u</sub> (cm<sup>4</sup>)'
+KEY_DISP_MOA_IV = '2nd Moment of Area, I<sub>v</sub> (cm<sup>4</sup>)'
+KEY_DISP_ROG = 'Radius of Gyration, r (cm)*'
+KEY_DISP_ROG_RZ = 'Radius of Gyration, r<sub>z</sub> (cm)'
+KEY_DISP_ROG_RY = 'Radius of Gyration, r<sub>y</sub> (cm)'
+KEY_DISP_ROG_RU = 'Radius of Gyration, r<sub>u</sub> (cm)'
+KEY_DISP_ROG_RV = 'Radius of Gyration, r<sub>v</sub> (cm)'
+KEY_DISP_SM = 'Section Modulus, Z (cm<sup>3</sup>)*'
+KEY_DISP_EM_ZZ = 'Elastic Modulus, Z<sub>z</sub> (cm<sup>3</sup>)'
+KEY_DISP_EM_ZY = 'Elastic Modulus, Z<sub>y</sub> (ccm<sup>3</sup>)'
+KEY_DISP_PM_ZPZ = 'Plastic Modulus, Z<sub>pz</sub> (cm<sup>3</sup>)'
+KEY_DISP_PM_ZPY = 'Plastic Modulus, Z<sub>py</sub> (cm<sup>3</sup>)'
+KEY_DISP_It = 'Torsion Constant, I<sub>t</sub> (cm<sup>4</sup>)'
+KEY_DISP_Iw = 'Warping Constant, I<sub>w</sub> (cm<sup>6</sup>)'
+KEY_DISP_IV = 'Internal Volume (cm<sup>3</sup>/m)*'
+
+KEY_SOURCE = 'Section.Source'
+KEY_DISP_SOURCE = 'Source'
+KEY_DISP_POISSON_RATIO = 'Poisson\'s Ratio, v'
+KEY_DISP_THERMAL_EXP = 'Thermal Expansion Coefficient, <br>(x10<sup>-6</sup>/ <sup>0</sup>C)'
+KEY_DISP_A= 'Long Leg, A (mm)*'
+KEY_DISP_B= 'Short Leg, B (mm)*'
+KEY_DISP_LEG_THK = 'Leg Thickness, t (mm)*'
+KEY_DISP_BASE_PLATE_MATERIAL = 'Material'
+KEY_DISP_ST_SK_MATERIAL = 'Material '
+KEY_DISP_REPORT_MATERIAL_GRADE = 'Material Grade, $F_{u}$ (MPa)'
+KEY_DISP_BASE_PLATE_FU = 'Ultimate Strength, Fu (MPa)'
+KEY_DSIP_BASE_PLATE_FY = 'Yield Strength , Fy (MPa)'
+KEY_DISP_ST_SK_FU = 'Ultimate Strength, Fu (MPa)'
+KEY_DSIP_ST_SK_FY = 'Yield Strength , Fy (MPa)'
+KEY_DISP_ULTIMATE_STRENGTH_REPORT = 'Ultimate Strength, $F_u$ (MPa)'
+KEY_DISP_YIELD_STRENGTH_REPORT = 'Yield Strength, $F_y$ (MPa)'
+
+# Common keys for design report
+
+# section properties (In the form of LaTeX equations)
+KEY_REPORT_MASS = 'Mass, $m$ (kg/m)'
+KEY_REPORT_AREA = 'Area, $A$ (cm$^2$)'
+KEY_REPORT_DEPTH = '$D$ (mm)'
+KEY_REPORT_WIDTH = '$B$ (mm)'
+KEY_REPORT_MAX_LEG_SIZE = '$A$ (mm)'
+KEY_REPORT_MIN_LEG_SIZE = '$B$ (mm)'
+KEY_REPORT_FLANGE_THK = '$T$ (mm)'
+KEY_REPORT_WEB_THK = '$t$ (mm)'
+KEY_REPORT_ANGLE_THK = '$t$ (mm)'
+KEY_REPORT_R1 = '$R_1$ (mm)'
+KEY_REPORT_R2 = '$R_2$ (mm)'
+KEY_REPORT_CY = '$C_y$ (mm)'
+KEY_REPORT_CZ = '$C_z$ (mm)'
+KEY_REPORT_IZ = '$I_z$ (cm$^4$)'
+KEY_REPORT_IY = '$I_y$(cm$^4$)'
+KEY_REPORT_IU = '$I_u$ (cm$^4$)'
+KEY_REPORT_IV = '$I_v$(cm$^4$)'
+KEY_REPORT_RZ = '$r_z$ (cm)'
+KEY_REPORT_RY = '$r_y$ (cm)'
+KEY_REPORT_RU = '$r_u$ (cm)'
+KEY_REPORT_RV = '$r_v$ (cm)'
+KEY_REPORT_ZEZ = '$Z_z$ (cm$^3$)'
+KEY_REPORT_ZEY = '$Z_y$ (cm$^3$)'
+KEY_REPORT_ZPZ = '$Z_{pz}$ (cm$^3$)'
+KEY_REPORT_ZPY = '$Z_{py}$ (cm$^3$)'
+KEY_REPORT_2ND_MOM = '2nd Moment of area, I ($cm^{4}/m$)'
+KEY_REPORT_RADIUS_GYRATION = 'Radius of gyration, r ($cm$)'
+KEY_REPORT_SECTION_MODULUS = 'Modulus of section, Z ($cm^{3}$)'
+KEY_REPORT_NB = 'Nominal bore, NB (mm)'
+KEY_REPORT_OD = 'Out diameter, OD (mm)'
+
+# Design cheks
+KEY_REPORT_DIAMETER = 'Diameter $(mm)$'
+KEY_REPORT_BOLT_NOS = 'Number of Bolts'
+KEY_REPORT_PROPERTY_CLASS = 'Property Class'
+KEY_REPORT_MIN_END = 'Min. End Distance $(mm)$'
+KEY_REPORT_MAX_END = 'Max. End Distance $(mm)$'
+KEY_REPORT_MIN_EDGE = 'Min. Edge Distance $(mm)$'
+KEY_REPORT_MAX_EDGE = 'Max. Edge Distance $(mm)$'
+KEY_REPORT_MIN_PITCH = 'Min. Pitch Distance $(mm)$'
+KEY_REPORT_MAX_PITCH = 'Max. Pitch Distance $(mm)$'
+KEY_REPORT_MIN_GAUGE = 'Min. Gauge Distance $(mm)$'
+KEY_REPORT_MAX_GAUGE = 'Max. Gauge Distance $(mm)$'
+
+KEY_REPORT_PLATE_LENGTH = 'Length $(mm)$'
+KEY_REPORT_PLATE_WIDTH = 'Width $(mm)$'
+KEY_REPORT_PLATE_HEIGHT = 'Height $(mm)$'
+
+KEY_REPORT_SHEAR_CAPA = 'Shear Capacity $(kN)$'
+KEY_REPORT_BEARING_CAPA = 'Bearing Capacity $(kN)$'
+KEY_REPORT_BOLT_CAPA = 'Bolt Capacity $(kN)$'
+KEY_REPORT_TENSION_CAPA = 'Tension Capacity $(kN)$'
+KEY_REPORT_TENSION_DEMAND = 'Tension Demand $(kN)$'
+
+########################
+# Output Keys
+########################
+KEY_OUT_ANCHOR_BOLT_SHEAR = 'Anchor Bolt.Shear'
+KEY_OUT_ANCHOR_BOLT_BEARING = 'Anchor Bolt.Bearing'
+KEY_OUT_ANCHOR_BOLT_CAPACITY = 'Anchor Bolt.Capacity'
+KEY_OUT_ANCHOR_BOLT_COMBINED = 'Anchor Bolt.Combined'
+KEY_OUT_ANCHOR_BOLT_TENSION_DEMAND = 'Anchor Bolt.Tension_Demand'
+KEY_OUT_ANCHOR_BOLT_TENSION = 'Anchor Bolt.Tension'
+KEY_MEMBER_CAPACITY = "section.memcapacity"
+KEY_MEMBER_AXIALCAPACITY='Section.AxialCapacity'
+KEY_MEMBER_SHEAR_CAPACITY='Section.ShearCapacity'
+KEY_MEMBER_MOM_CAPACITY='Section.MomCapacity'
+KEY_OUT_BASEPLATE_THICKNNESS = 'Baseplate.Thickness'
+KEY_OUT_BASEPLATE_LENGTH = 'Baseplate.Length'
+KEY_OUT_BASEPLATE_WIDTH = 'Baseplate.Width'
+KEY_OUT_BASEPLATE_BEARING_STRESS = 'Baseplate.BearingStress'
+KEY_OUT_BASEPLATE_MOMENT_DEMAND = 'Baseplate.MomentDemand'
+KEY_OUT_DISP_BASEPLATE_MOMENT_DEMAND = 'Moment Demand (kNm)'
+KEY_OUT_BASEPLATE_MOMENT_CAPACITY = 'Baseplate.MomentCapacity'
+KEY_OUT_DISP_BASEPLATE_MOMENT_CAPACITY = 'Moment Capacity (kNm)'
+# KEY_OUT_DISP_BASEPLATE_BEARING_STRESS = 'Bearing Stress (N/mm<sup>2</sup>)'
+KEY_OUT_DISP_BASEPLATE_BEARING_STRESS = 'Bearing Stress (MPa)'
+KEY_OUT_DETAILING_PROJECTION = 'Detailing.Projection'
+KEY_OUT_DETAILING_NO_OF_ANCHOR_BOLT = 'Detailing.No of Anchor bolts'
+KEY_OUT_DETAILING_EDGE_DISTANCE = 'Detailing.EdgeDistanceOut'
+KEY_IN_DETAILING_EDGE_DISTANCE = 'Detailing.EdgeDistanceIn'
+KEY_OUT_DETAILING_GAUGE_DISTANCE = 'Detailing.GaugeDistanceOut'
+KEY_IN_DETAILING_GAUGE_DISTANCE = 'Detailing.GaugeDistanceIn'
+KEY_OUT_DETAILING_CS_GAUGE_DISTANCE = 'Detailing.Cross-centre Gauge Distance'
+KEY_OUT_DETAILING_PITCH_DISTANCE = 'Detailing.PitchDistanceOut'
+KEY_IN_DETAILING_PITCH_DISTANCE = 'Detailing.PitchDistanceIn'
+KEY_BOLT_FU = 'Bolt.fu'
+KEY_BOLT_FY = 'Bolt.fy'
+
+KEY_OUT_DISP_DETAILING_BOLT_COLUMNS = 'Detailing.No. of Columns'
+KEY_OUT_DISP_DETAILING_BOLT_COLUMNS_EP = 'No. of Columns'
+KEY_OUT_DISP_DETAILING_BOLT_ROWS = 'Detailing.No. of Rows'
+KEY_OUT_DISP_DETAILING_BOLT_ROWS_EP = 'No. of Rows'
+KEY_OUT_DISP_DETAILING_BOLT_NUMBERS = 'Detailing.No. of Bolts'
+KEY_OUT_DISP_DETAILING_BOLT_NUMBERS_EP = 'No. of Bolts'
+
+
+KEY_OUT_GUSSET_PLATE_THICKNNESS = 'GussetPlate.Thickness'
+KEY_OUT_GUSSET_PLATE_SHEAR_DEMAND = 'GussetPlate.Shear_Demand'
+KEY_OUT_GUSSET_PLATE_SHEAR = 'GussetPlate.Shear'
+KEY_OUT_GUSSET_PLATE_MOMENT_DEMAND = 'GussetPlate.Moment_Demand'
+KEY_OUT_GUSSET_PLATE_MOMENT = 'GussetPlate.Moment'
+KEY_OUT_STIFFENER_PLATE_THICKNNESS = 'StiffenerPlate.Thickness'
+
+KEY_OUT_STIFFENER_PLATE_SHEAR_DEMAND = 'StiffenerPlate.Shear_Demand'
+KEY_OUT_STIFFENER_PLATE_SHEAR_DEMAND_CHS = 'StiffenerPlate.Shear_Demand'
+KEY_OUT_STIFFENER_PLATE_SHEAR_CAPACITY = 'StiffenerPlate.Shear_Capacity'
+KEY_OUT_STIFFENER_PLATE_SHEAR_CAPACITY_CHS = 'StiffenerPlate.Shear_Capacity'
+KEY_OUT_STIFFENER_PLATE_SHEAR = 'StiffenerPlate.Shear'
+KEY_OUT_STIFFENER_PLATE_MOMENT_DEMAND = 'StiffenerPlate.Moment_Demand'
+KEY_OUT_STIFFENER_PLATE_MOMENT_DEMAND_CHS = 'StiffenerPlate.Moment_Demand'
+KEY_OUT_STIFFENER_PLATE_MOMENT_CAPACITY = 'StiffenerPlate.Moment_Capacity'
+KEY_OUT_STIFFENER_PLATE_MOMENT_CAPACITY_CHS = 'StiffenerPlate.Moment_Capacity'
+KEY_OUT_STIFFENER_PLATE_MOMENT = 'StiffenerPlate.Moment'
+
+KEY_PLATE_MIN_HEIGHT = 'Plate.MinHeight'
+KEY_PLATE_MAX_HEIGHT = 'Plate.MaxHeight'
+KEY_SLENDER = "Member.Slenderness"
+
+KEY_INNERFLANGEPLATE_THICKNESS = 'flange_plate.innerthickness_provided'
+KEY_FLANGE_PLATE_HEIGHT = 'Flange_Plate.Width (mm)'
+KEY_OUT_FLANGESPLATE_THICKNESS = 'flange_plate.Thickness'
+KEY_DISP_FLANGESPLATE_THICKNESS = 'Thickness (mm) *'
+KEY_FLANGE_PLATE_LENGTH ='flange_plate.Length'
+KEY_OUT_FLANGE_BOLT_SHEAR ="flange_bolt.shear capacity"
+
+KEY_INNERPLATE= "flange_plate.Inner_plate_details"
+
+KEY_INNERFLANGE_PLATE_HEIGHT = 'Flange_Plate.InnerWidth'
+KEY_INNERFLANGE_PLATE_LENGTH ='flange_plate.InnerLength'
+
+KEY_DISP_AREA_CHECK ="Plate Area Check (mm2)"
+
+
+KEY_FLANGE_SPACING ="Flange_plate.spacing"
+
+KEY_FLANGE_PITCH = 'Flange_plate.pitch_provided'
+KEY_FLANGE_PLATE_GAUGE = "Flange_plate.gauge_provided "
+KEY_ENDDIST_FLANGE= 'Flange_plate.end_dist_provided '
+KEY_EDGEDIST_FLANGE= 'Flange_plate.edge_dist_provided'
+
+KEY_FLANGE_CAPACITY ='section.flange_capacity'
+
+# flange
+KEY_FLANGE_TEN_CAPACITY ="Section.flange_capacity"
+KEY_DISP_FLANGE_TEN_CAPACITY ="Flange Tension Capacity (kN)"
+KEY_TENSIONYIELDINGCAP_FLANGE = 'section.tension_yielding_capacity'
+KEY_DISP_TENSIONYIELDINGCAP_FLANGE = 'Flange Tension Yielding Capacity (kN)'
+KEY_TENSIONRUPTURECAP_FLANGE='section.tension_rupture_capacity '
+KEY_DISP_TENSIONRUPTURECAP_FLANGE= 'Flange Tension Rupture Capacity (kN)'
+KEY_BLOCKSHEARCAP_FLANGE='section.block_shear_capacity'
+KEY_DISP_BLOCKSHEARCAP_FLANGE='Flange Block Shear Capacity (kN)'
+# flange plate
+KEY_TENSIONYIELDINGCAP_FLANGE_PLATE = 'Flange_plate.tension_yielding_capacity (kN)'
+KEY_DISP_TENSIONYIELDINGCAP_FLANGE_PLATE ='Tension Yielding Capacity (kN)'
+KEY_TENSIONRUPTURECAP_FLANGE_PLATE= 'Flange_plate.tension_rupture_capacity (kN)'
+KEY_DISP_TENSIONRUPTURECAP_FLANGE_PLATE ='Tension Rupture Capacity (kN)'
+KEY_BLOCKSHEARCAP_FLANGE_PLATE = 'flange_plate.block_shear_capacity '
+KEY_DISP_BLOCKSHEARCAP_FLANGE_PLATE ='Block Shear Capacity (kN)'
+KEY_FLANGE_PLATE_TEN_CAP ="flange_plate.tension_capacity_flange_plate"
+
+
+
+# KEY_TENSIONRUPTURECAP_FLANGE= 'Flange_plate.tension_rupture_capacity'
+# KEY_DISP_TENSIONRUPTURECAP_FLANGE= 'Flange Tension Rupture Capacity (kN)'
+# KEY_SHEARYIELDINGCAP_FLANGE= 'Flange_plate.shear_yielding_capacity'
+# KEY_DISP_SHEARYIELDINGCAP_FLANGE= 'Shear Yielding Capacity (kN)'
+# KEY_SHEARRUPTURECAP_FLANGE= 'Flange_plate.shear_rupture_capacity'
+# KEY_DISP_SHEARRUPTURECAP_FLANGE= 'Shear Rupture Capacity (kN)'
+KEY_FLANGE_PLATE_MOM_DEMAND = 'Flange_Plate.MomDemand'
+KEY_FLANGE_DISP_PLATE_MOM_DEMAND = 'Flange Moment Demand (kNm)'
+KEY_FLANGE_PLATE_MOM_CAPACITY='Flange_plate.MomCapacity'
+KEY_FLANGE_DISP_PLATE_MOM_CAPACITY = 'Flange Moment Capacity (kNm)'
+KEY_DESIGNATION = "section_size.designation"
+KEY_DISP_DESIGNATION = "Designation"
+
+
+KEY_TENSION_YIELDCAPACITY = "Member.tension_yielding"
+KEY_DISP_TENSION_YIELDCAPACITY = 'Tension Yielding Capacity (kN)'
+KEY_TENSION_RUPTURECAPACITY = "Member.tension_rupture"
+KEY_DISP_TENSION_RUPTURECAPACITY = 'Tension Rupture Capacity (kN)'
+KEY_TENSION_BLOCKSHEARCAPACITY = "Member.tension_blockshear"
+KEY_DISP_TENSION_BLOCKSHEARCAPACITY = 'Block Shear Capacity (kN)'
+
+KEY_SHEAR_YIELDCAPACITY = "Member.shear_yielding"
+KEY_SHEAR_RUPTURECAPACITY = "Member.shear_rupture"
+KEY_SHEAR_BLOCKSHEARCAPACITY = "Member.shear_blockshear"
+
+
+
+KEY_TENSION_CAPACITY = "Member.tension_capacity"
+KEY_DISP_TENSION_CAPACITY = "Tension Capacity (kN)"
+
+KEY_EFFICIENCY = "Member.efficiency"
+KEY_DISP_EFFICIENCY = "Utilization Ratio"
+
+DISP_TITLE_BOLTDETAILS ='Bolt Details'
+KEY_BOLT_DETAILS ="Bolt.Details"
+
+DISP_TITLE_BOLT_CAPACITIES = 'Bolt Capacities'
+KEY_BOLT_CAPACITIES = 'Bolt.Capacities'
+DISP_THROAT_THICKNESS = "Throat Thickness"
+DISP_TITLE_BOLT_CAPACITY_FLANGE= 'Flange Bolt Capacity'
+KEY_DISP_BOLT_DETAILS = "Bolt Details"
+KEY_FLANGE_BOLT_LINE = 'Flange_plate.Bolt_Line'
+KEY_FLANGE_DISP_BOLT_LINE = 'Bolt Lines '
+KEY_FLANGE_BOLTS_ONE_LINE = 'Flange_plate.Bolt_OneLine'
+KEY_FLANGE_DISP_BOLTS_ONE_LINE = 'Bolts in One Line '
+KEY_FLANGE_BOLTS_REQ = "Flange_plate.Bolt_required"
+KEY_FLANGE_DISP_BOLTS_REQ = "Bolts Required"
+KEY_FLANGE_NUM_BOLTS_REQ = "Flange_plate.Bolt_required"
+
+
+KEY_FLANGE_WELD_DETAILS = "Flange detail"
+KEY_DISP_FLANGE_WELD_DETAILS = "Weld Details"
+
+KEY_INNERFLANGE_WELD_DETAILS = "Inner Flange detail"
+KEY_DISP_INNERFLANGE_WELD_DETAILS = "Weld Details"
+
+KEY_WELD_TYPE = 'Weld.Type'
+KEY_DISP_WELD_TYPE = 'Type *'
+VALUES_WELD_TYPE = ["Fillet Weld", "Groove Weld"]
+VALUES_WELD_TYPE_EP = ["Groove Weld", "Fillet Weld"]
+VALUES_WELD_TYPE_BB_FLUSH = ["Groove Weld"]
+DISP_FLANGE_TITLE_WELD = 'Flange Weld'
+KEY_FLANGE_WELD_SIZE = 'Flange_Weld.Size'
+KEY_FLANGE_DISP_WELD_SIZE = 'Flange Weld Size (mm)'
+KEY_FLANGE_WELD_STRENGTH = 'Flange_Weld.Strength'
+KEY_FLANGE_DISP_WELD_STRENGTH = 'Flange Weld Strength (N/mm)'
+KEY_FLANGE_WELD_STRESS = 'Flange_Weld.Stress'
+KEY_FLANGE_DISP_WELD_STRESS = 'Flange Weld Stress (N/mm)'
+KEY_FLANGE_WELD_LENGTH = 'Flange_Weld.Length'
+KEY_DISP_FLANGE_WELD_LENGTH ='Flange Weld Length'
+KEY_FLANGE_WELD_LENGTH_EFF = 'Flange_Weld.EffLength'
+
+KEY_DISP_WELD_LEN_EFF_OUTSIDE = 'EffLength. Outer+Inner flange'
+KEY_DISP_CLEARANCE = "Clearance (mm)"
+KEY_FLANGE_WELD_HEIGHT ='flange_Weld.height'
+KEY_DISP_FLANGE_WELD_HEIGHT = 'Flange Weld Height'
+DISP_EFF = "Effective Length (mm)"
+KEY_INNERFLANGE_WELD_LENGTH = 'Flange_Weld.InnerLength'
+KEY_DISP_INNERFLANGE_WELD_LENGTH ='Length (mm)'
+KEY_INNERFLANGE_WELD_LENGTH_EFF = 'Flange_Weld.InnerEffLength'
+KEY_INNERFLANGE_WELD_HEIGHT ='flange_Weld.Innerheight'
+KEY_DISP_INNERFLANGE_WELD_HEIGHT = 'Height (mm)'
+KEY_INNERFLANGE_WELD_STRESS = 'Inner_Flange_Weld.Stress'
+KEY_INNERFLANGE_DISP_WELD_STRESS = 'Flange Weld Stress (N/mm)'
+KEY_INNERFLANGE_WELD_STRENGTH = 'Inner_Flange_Weld.Strength'
+KEY_INNERFLANGE_DISP_WELD_STRENGTH = 'Flange Weld Strength (N/mm)'
+
+# FLANGE AND WEB -REDUCTION FACTOR
+KEY_REDUCTION_FACTOR_LONG_FLANGE ='flange_plate.red,factor'
+KEY_DISP_REDUCTION_FACTOR_FLANGE ="Long Joint Red.Factor"
+
+KEY_REDUCTION_FACTOR_LONG_WEB ='web_plate.red,factor'
+KEY_DISP_REDUCTION_FACTOR_LONG_WEB ="Long Joint Red.Factor"
+
+KEY_REDUCTION_LARGE_GRIP_WEB = 'web_bolt.large_grip'
+KEY_DISP_REDUCTION_LARGE_GRIP_WEB = "Large Grip Red.Factor"
+
+KEY_REDUCTION_LARGE_GRIP_FLANGE = 'flange_bolt.large_grip'
+KEY_DISP_REDUCTION_LARGE_GRIP_FLANGE = "Large Grip Red.Factor"
+
+# COMMON -REDUCTION FACTOR
+KEY_REDUCTION_LONG_JOINT ="bolt.long_joint"
+KEY_DISP_REDUCTION_LONG_JOINT ="Long Joint Red.Factor"
+
+KEY_REDUCTION_LARGE_GRIP ="bolt.large_grip"
+KEY_DISP_REDUCTION_LARGE_GRIP ="Large Grip Red.Factor"
+
+
+
+KEY_DISP_REDUCTION ="Strength Red.Factor"
+KEY_OUT_FLANGE_BOLT_SHEAR ='flange_bolt.bolt_shear_capacity'
+KEY_OUT_DISP_FLANGE_BOLT_SHEAR = "Shear Capacity (kN)"
+KEY_OUT_FLANGE_BOLT_BEARING = 'flange_bolt.bolt_bearing_capacity'
+KEY_OUT_DISP_FLANGE_BOLT_BEARING = "Bearing Capacity (kN)"
+KEY_OUT_FLANGE_BOLT_CAPACITY = 'flange_bolt.bolt_capacity'
+KEY_OUT_DISP_FLANGE_BOLT_CAPACITY ="Bolt Capacity (kN)"
+KEY_OUT_DISP_FLANGE_BOLT_SLIP= 'Slip Resistance (kN)'
+KEY_FLANGE_BOLT_GRP_CAPACITY = 'flange_bolt.grp_bolt_capacity'
+KEY_OUT_FLANGE_BOLT_GRP_CAPACITY = 'flange bolt grp bolt capacity (kN)'
+KEY_OUT_MIN_PITCH= 'Min_pitch'
+
+KEY_OUT_FLANGE_MIN_PITCH= 'flange_bolt.min_pitch_round'
+KEY_OUT_FLANGE_MIN_EDGE_DIST= 'flange_bolt.min_edge_dist_round'
+KEY_OUT_FLANGE_MAX_EDGE_DIST='flange_bolt.max_edge_dist_round'
+
+KEY_OUT_DISP_FORCES_FLANGE = 'Force Carried by Flange'
+KEY_OUT_DISP_FORCES_WEB= 'Force Carried by Web'
+KEY_OUT_WEB_BOLT_SHEAR ='web_bolt.bolt_shear_capacity'
+KEY_OUT_DISP_WEB_BOLT_SHEAR = "Shear Capacity (kN)"
+KEY_OUT_WEB_BOLT_BEARING = 'web_bolt.bolt_bearing_capacity'
+KEY_OUT_DISP_WEB_BOLT_BEARING = "Bearing Capacity (kN)"
+KEY_OUT_WEB_BOLT_CAPACITY = 'web_bolt.bolt_capacity'
+KEY_OUT_DISP_WEB_BOLT_CAPACITY ="Bolt Capacity (kN)"
+KEY_OUT_DISP_WEB_BOLT_SLIP= 'Slip Resistance (kN)'
+KEY_WEB_BOLT_GRP_CAPACITY = 'web_bolt.grp_bolt_capacity'
+KEY_OUT_WEB_BOLT_GRP_CAPACITY = 'Web bolt grp bolt capacity (kN)'
+KEY_OUT_REQ_MOMENT_DEMAND_BOLT = "Moment Demand (kNm)"
+KEY_OUT_REQ_PARA_BOLT = "Bolt Force Parameter(s) (mm)"
+DISP_TITLE_WEBSPLICEPLATE = 'Web Splice Plate'
+KEY_DISP_WEBPLATE_THICKNESS = 'Thickness (mm)*'
+
+
+
+
+KEY_WEB_PLATE_HEIGHT = 'Web_Plate.Height (mm)'
+KEY_DISP_WEB_PLATE_HEIGHT = 'Height (mm)'
+KEY_WEB_PLATE_LENGTH ='Web_Plate.Width'
+KEY_OUT_WEBPLATE_THICKNESS = 'Web_Plate.Thickness'
+KEY_DISP_WEBPLATE_THICKNESS = 'Thickness (mm) *'
+KEY_DISP_WEB_PLATE_LENGTH ='Width (mm)'
+DISP_TITLE_BOLT_CAPACITY_WEB = 'Web Bolt Capacity'
+KEY_BOLT_CAPACITIES_WEB = 'Web Bolt.Capacities'
+
+KEY_WEB_SPACING ="Web_plate.spacing"
+KEY_DISP_WEB_SPACING = 'Spacing (mm)'
+KEY_WEB_PITCH = "Web_plate.pitch_provided"
+KEY_DISP_WEB_PLATE_PITCH ="Pitch Distance (mm)"
+KEY_WEB_GAUGE = "Web_plate.gauge_provided "
+KEY_DISP_WEB_PLATE_GAUGE ="Gauge Distance (mm)"
+KEY_ENDDIST_W= 'Web_plate.end_dist_provided '
+KEY_DISP_END_DIST_W = 'End Distance (mm)'
+KEY_EDGEDIST_W = 'Web_plate.edge_dist_provided'
+KEY_DISP_EDGEDIST_W = 'Edge Distance (mm)'
+
+KEY_WEB_CAPACITY ='section.web_capacities'
+KEY_DISP_WEB_CAPACITY ='Capacity'
+
+#SimpleConnection(Tension+Compression)
+KEY_OUT_DESIGN_FOR = "Design For" 
+KEY_OUT_DISP_DESIGN_FOR = "Design For"
+
+
+# Web plate
+KEY_REDUCTION_FACTOR_WEB ='web_plate.red,factor'
+KEY_DISP_REDUCTION_FACTOR_WEB ="Red. Factor"
+KEY_WEB_PLATE_CAPACITY ="Web_plate.capacity"
+KEY_DISP_WEB_PLATE_CAPACITY= 'Web Plate Tension Capacity (kN)'
+KEY_TEN_YIELDCAPACITY_WEB_PLATE = "Web_plate.tension_yielding"
+KEY_DISP_TENSION_YIELDCAPACITY_WEB_PLATE = 'Tension Yielding Capacity (kN)'
+KEY_TENSION_RUPTURECAPACITY_WEB_PLATE = "Web_plate.tension_rupture"
+KEY_DISP_TENSION_RUPTURECAPACITY_WEB_PLATE= 'Tension Rupture Capacity (kN)'
+KEY_TENSION_BLOCKSHEARCAPACITY_WEB_PLATE = "Web_plate.tension_blockshear"
+KEY_DISP_TENSION_BLOCKSHEARCAPACITY_WEB_PLATE = 'Block Shear Capacity (kN)'
+# Web
+KEY_TENSIONYIELDINGCAP_WEB = "section.tension_yielding_capacity_web"
+KEY_DISP_TENSIONYIELDINGCAP_WEB ='Web Tension Yielding Capacity (kN)'
+KEY_TENSIONRUPTURECAP_WEB ='section.tension_rupture_capacity_web'
+KEY_DISP_TENSIONRUPTURECAP_WEB ='Web Tension Rupture Capacity (kN)'
+KEY_TENSIONBLOCK_WEB ='section.block_shear_capacity_web'
+KEY_DISP_BLOCKSHEARCAP_WEB ='Web Block Shear Capacity (kN)'
+KEY_WEB_TEN_CAPACITY ="section.Tension_capacity_web"
+KEY_DISP_WEB_TEN_CAPACITY ="Web Tension Capacity (kN)"
+# web in shear
+KEY_SHEARYIELDINGCAP_WEB_PLATE= 'web_plate.shear_yielding_capacity'
+KEY_DISP_SHEARYIELDINGCAP_WEB_PLATE= 'Shear Yielding Capacity (kN)'
+KEY_BLOCKSHEARCAP_WEB_PLATE='web_plate.block_shear_capacity'
+KEY_DISP_BLOCKSHEARCAP_WEB_PLATE='Block Shear Capacity (kN)'
+KEY_SHEARRUPTURECAP_WEB_PLATE= 'web_plate.shear_rupture_capacity'
+KEY_DISP_SHEARRUPTURECAP_WEB_PLATE= 'Shear Rupture Capacity (kN)'
+KEY_WEBPLATE_SHEAR_CAPACITY_PLATE ="web_plate.shear_capacity_web_plate"
+KEY_DISP_WEBPLATE_SHEAR_CAPACITY_PLATE ="Web Plate Shear Capacity (kN)"
+KEY_WEB_PLATE_MOM_DEMAND = 'Web_Plate.MomDemand'
+KEY_WEB_DISP_PLATE_MOM_DEMAND = 'Web Moment Demand (kNm)'
+KEY_WEB_PLATE_MOM_CAPACITY='Web_plate.MomCapacity'
+KEY_WEB_DISP_PLATE_MOM_CAPACITY = 'Moment Capacity (kNm)'
+KEY_WEB_BOLT_LINE = 'Web_plate.Bolt_Line'
+KEY_WEB_DISP_BOLT_LINE = 'Bolt Lines'
+KEY_WEB_BOLTS_REQ = "Web_plate.Bolt_required"
+KEY_WEB_DISP_BOLTS_REQ = "Bolt Required"
+KEY_WEB_BOLTS_ONE_LINE = 'Web_plate.Bolt_OneLine'
+KEY_WEB_DISP_BOLTS_ONE_LINE = 'Bolts in One Line'
+
+KEY_WEB_WELD_DETAILS = "Web detail"
+KEY_DISP_WEB_WELD_DETAILS = "Weld Details"
+DISP_WEB_TITLE_WELD = 'Web Weld'
+KEY_WEB_WELD_SIZE = 'Web_Weld.Size'
+KEY_WEB_DISP_WELD_SIZE = 'Web Weld Size (mm)'
+KEY_WEB_WELD_STRENGTH = 'Web_Weld.Strength'
+KEY_WEB_DISP_WELD_STRENGTH = 'Web Weld Strength (N/mm)'
+KEY_WEB_WELD_STRESS = 'Web_Weld.Stress'
+KEY_WEB_DISP_WELD_STRESS = 'Web Weld Stress (N/mm)'
+KEY_WEB_WELD_LENGTH = 'Web_Weld.Length'
+KEY_DISP_WEB_WELD_LENGTH = 'Web Weld Length'
+KEY_WEB_WELD_LENGTH_EFF = 'Web_Weld.EffLength'
+KEY_WEB_WELD_HEIGHT ='Web_Weld.height'
+KEY_DISP_WEB_WELD_HEIGHT = 'Web Weld Height'
+KEY_OUT_LONG_JOINT_WELD = 'Weld Strength (post long joint) (N/mm)'
+KEY_OUT_DISP_RED_WELD_STRENGTH = 'Weld Strength (N/mm)'
+
+
+DISP_TITLE_ENDPLATE = 'End Plate'
+
+KEY_ENDPLATE_THICKNESS = 'Plate.end_plate.Thickness'
+KEY_DISP_ENDPLATE_THICKNESS = 'Thickness (mm) *'
+
+KEY_BASE_PLATE_MATERIAL = 'Base_Plate.Material'
+KEY_ST_KEY_MATERIAL = 'Stiffener_Key.Material'
+KEY_BASE_PLATE_FU = 'Base_Plate.Fu'
+KEY_BASE_PLATE_FY = 'Base_Plate.Fy'
+KEY_ST_KEY_FU = 'Stiffener_Key.Fu'
+KEY_ST_KEY_FY = 'Stiffener_Key.Fy'
+
+KEY_DISP_LEVER_ARM = "Lever Arm (mm)"
+KEY_DISP_REQ_PARA= "Parameters"
+KEY_BOLT_STATUS = 'Bolt.DesignStatus'
+KEY_OUT_D_PROVIDED = 'Bolt.Diameter'
+KEY_OUT_DISP_D_PROVIDED = 'Diameter (mm)'
+KEY_OUT_DISP_D_MIN= 'Min. Diameter (mm)'
+KEY_OUT_INTER_D_PROVIDED = 'Bolt.InterDiameter'
+KEY_OUT_DISP_INTER_D_PROVIDED = 'Diameter (mm)'
+
+
+
+
+KEY_OUT_GRD_PROVIDED = 'Bolt.Grade_Provided'
+KEY_OUT_DISP_TYP_PROVIDED = 'Type'
+KEY_OUT_TYP_PROVIDED = 'Bolt.Type_Provided'
+KEY_OUT_DISP_GRD_PROVIDED = 'Property Class'
+KEY_OUT_INTER_GRD_PROVIDED = 'Bolt.InterGrade'
+KEY_OUT_DISP_INTER_GRD_PROVIDED = 'Grade'
+
+
+
+
+KEY_OUT_DISP_PC_PROVIDED = 'Property Class'
+KEY_OUT_ROW_PROVIDED = 'Bolt.Rows'
+KEY_OUT_DISP_ROW_PROVIDED = 'Rows of Bolts'
+KEY_OUT_COL_PROVIDED = 'Bolt.Cols'
+KEY_OUT_DISP_COL_PROVIDED = 'Columns of Bolts'
+KEY_OUT_TOT_NO_BOLTS = 'Bolt.number'
+KEY_OUT_DISP_TOT_NO_BOLTS = 'Number of Bolts'
+KEY_OUT_KB = 'Bolt.Kb'
+KEY_OUT_BOLT_HOLE = 'Bolt.Hole'
+KEY_DISP_BOLT_HOLE = 'Hole Diameter (mm)'
+KEY_DISP_MIN_BOLT = 'Minimum Bolts (nos)'
+
+KEY_OUT_WELD_CONN_LEN = 'Weld.ConnLength'
+
+KEY_OUT_BOLT_CONN_LEN = 'Bolt.ConnLength'
+KEY_UTILIZATION_RATIO = 'Bolt.UtilizationRatio'
+KEY_DISP_UTILIZATION_RATIO = 'Utilization Ratio'
+KEY_OUT_DISP_BOLT_CONN_LEN = 'Length of Connection (mm)'
+KEY_OUT_DISP_WELD_CONN_LEN = 'Length of Connection (mm)'
+KEY_OUT_BOLT_UTILIZATION = 'Bolt.Utilization'
+KEY_OUT_DISP_BOLT_UTILIZATION = 'Bolt Utilization'
+KEY_OUT_BASE_METAL_CAPACITY = 'Plate.BaseCapacity'
+KEY_OUT_DISP_BASE_METAL_CAPACITY = 'Base Metal Capacity (kN)'
+KEY_OUT_BASE_METAL_UTILIZATION = 'Plate.BaseUtilization'
+KEY_OUT_DISP_BASE_METAL_UTILIZATION = 'Base Metal Utilization'
+
+KEY_DISP_BOLT_AREA = 'Nominal Stress Area (mm2)'
+KEY_DISP_KB = 'Kb'
+
+KEY_OUT_BOLT_IR_DETAILS = 'Bolt.IRDetails'
+KEY_OUT_BOLT_IR_DETAILS_SPTD = 'Bolt.IRDetails_sptd'
+KEY_OUT_BOLT_IR_DETAILS_SPTING = 'Bolt.IRDetails_spting'
+KEY_OUT_DISP_BOLT_IR_DETAILS = 'Capacity Details'
+KEY_OUT_BOLT_SHEAR = 'Bolt.Shear'
+KEY_OUT_DISP_BOLT_SHEAR = 'Shear Capacity (kN)'
+KEY_OUT_BOLT_BEARING = 'Bolt.Bearing'
+KEY_OUT_DISP_BOLT_BEARING = 'Bearing Capacity (kN)'
+KEY_OUT_BETA_LJ = 'Bolt.Betalj'
+KEY_OUT_DISP_BETA_LJ = 'β<sub>lj</sub>'
+KEY_OUT_BETA_LG = 'Bolt.Betalg'
+KEY_OUT_DISP_BETA_LG = 'β<sub>lg</sub>'
+KEY_OUT_BETA_PK = 'Bolt.Betapk'
+KEY_OUT_DISP_BETA_PK = 'β<sub>pk</sub>'
+KEY_OUT_DISP_BOLT_SLIP= 'Slip Resistance'
+KEY_OUT_BOLT_SLIP = 'Bolt.Slip'
+KEY_OUT_DISP_BOLT_SLIP_DR = 'Slip Resistance (kN)'
+KEY_OUT_BOLT_CAPACITY = 'Bolt.Capacity'
+KEY_OUT_BOLT_CAPACITY_SPTD = 'Bolt.Capacity_sptd'
+KEY_OUT_BOLT_CAPACITY_SPTING = 'Bolt.Capacity_spting'
+KEY_OUT_DISP_BOLT_CAPACITY = 'Capacity (kN)'
+KEY_OUT_DISP_BOLT_VALUE = 'Bolt Value (kN)'
+KEY_OUT_BOLT_FORCE = 'Bolt.Force (kN)'
+KEY_OUT_DISP_BOLT_FORCE = 'Bolt Force (kN)'
+KEY_OUT_DISP_BOLT_SHEAR_FORCE = 'Bolt Shear Force (kN)'
+KEY_OUT_BOLT_TENSION_FORCE = 'Bolt.TensionForce'
+KEY_OUT_DISP_BOLT_TENSION_FORCE = 'Bolt Tension Force (kN)'
+KEY_OUT_DISP_CRITICAL_BOLT_TENSION = 'Tension Due to Moment (kN)'
+KEY_OUT_DISP_BOLT_TENSION_AXIAL = 'Tension due to Moment and Axial Force (kN)'
+KEY_OUT_BOLT_PRYING_FORCE = 'Bolt.PryingForce'
+KEY_OUT_DISP_BOLT_PRYING_FORCE = 'Bolt Prying Force (kN)'
+KEY_OUT_DISP_BOLT_PRYING_FORCE_EP = 'Prying Force (kN)'
+KEY_OUT_BOLT_TENSION_TOTAL = 'Bolt.TensionTotal'
+KEY_OUT_DISP_BOLT_TENSION_TOTAL = 'Total Bolt Tension (kN)'
+KEY_OUT_DISP_BOLT_TENSION_DEMAND = 'Tension Demand (kN)'
+KEY_OUT_DISP_BOLT_SHEAR_DEMAND = 'Shear Demand (kN)'
+KEY_OUT_BOLT_TENSION_CAPACITY = 'Bolt.Tension'
+KEY_OUT_BOLT_TENSION_CAPACITY1 = 'Bolt Tension Capacity (kN)'
+KEY_OUT_DISP_BOLT_TENSION_CAPACITY = 'Bolt Tension Capacity (kN)'
+KEY_OUT_CRITICAL_BOLT_TENSION_CAPACITY = 'Tension Capacity (kN)'
+KEY_OUT_BOLTS_REQUIRED = 'Bolt.Required'
+KEY_OUT_LONG_JOINT = 'Long Joint Reduction Factor'
+KEY_OUT_LARGE_GRIP = 'Large Grip Length Reduction Factor'
+KEY_OUT_PACKING_PLATE = 'Packing Plate Reduction Factor'
+KEY_OUT_BOLT_CAPACITY_REDUCED = 'Bolt Capacity (post reduction factor) (kN)'
+KEY_OUT_BOLT_GRP_CAPACITY = 'Bolt.GroupCapacity'
+KEY_OUT_BOLT_LINE = 'Bolt.Line'
+KEY_OUT_DISP_BOLT_LINE = 'Bolt Columns (nos)'
+KEY_OUT_INTER_BOLT_LINE = 'Bolt.InterLine'
+KEY_OUT_DISP_INTER_BOLT_LINE = 'Columns (nos)'
+KEY_OUT_BOLT_IR = 'Bolt.IR'
+KEY_OUT_DISP_BOLT_IR = 'Interaction Ratio'
+KEY_OUT_DISP_BOLT_COMBINED_CAPACITY = 'Combined Capacity, I.R'
+
+
+KEY_OUT_BOLTS_ONE_LINE = 'Bolt.OneLine'
+KEY_OUT_DISP_BOLTS_ONE_LINE = 'Bolt Rows (nos)'
+KEY_OUT_BOLTS_ONE_LINE_S = 'Bolt.OneLineT'
+KEY_OUT_DISP_BOLTS_ONE_LINE_S = 'Rows per Angle(nos)'
+
+KEY_OUT_INTER_BOLTS_ONE_LINE = 'Bolt.InterOneLine'
+KEY_OUT_DISP_INTER_BOLTS_ONE_LINE = 'Rows (nos)'
+
+
+KEY_OUT_SPACING = 'spacing'
+KEY_OUT_DISP_SPACING = 'Spacing'
+KEY_OUT_DISP_PATTERN = 'Pattern'
+KEY_OUT_PITCH = 'Bolt.Pitch'
+KEY_OUT_DISP_PITCH = 'Pitch Distance (mm)'
+KEY_OUT_PATTERN_1 = 'pattern1'
+KEY_OUT_PATTERN_2 = 'pattern2'
+
+KEY_OUT_Lw = 'Weld.Lw'
+KEY_OUT_DISP_Lw = 'Lw (mm)'
+KEY_OUT_Hw = 'Weld.Hw'
+KEY_OUT_DISP_Hw = 'Hw (mm)'
+
+
+KEY_OUT_END_DIST = 'Bolt.EndDist'
+KEY_OUT_DISP_END_DIST = 'End Distance (mm)'
+KEY_OUT_GAUGE = 'Bolt.Gauge'
+KEY_OUT_DISP_GAUGE = 'Gauge Distance (mm)'
+KEY_OUT_GAUGE1 = 'Bolt.Gauge1'
+KEY_OUT_DISP_GAUGE1 = 'Gauge Distance 1 (mm)'
+KEY_OUT_GAUGE2 = 'Bolt.Gauge2'
+KEY_OUT_DISP_GAUGE2 = 'Gauge Distance 2 (mm)'
+KEY_OUT_GAUGE_CENTRAL = 'Bolt.GaugeCentral'
+KEY_OUT_DISP_GAUGE_CENTRAL = 'Central Gauge (mm)'
+
+KEY_OUT_MIN_GAUGE = 'Bolt.MinGauge'
+KEY_OUT_MAX_SPACING = 'Bolt.MaxGauge'
+
+KEY_OUT_EDGE_DIST = 'Bolt.EdgeDist'
+KEY_OUT_MIN_EDGE_DIST = 'Bolt.MinEdgeDist'
+KEY_OUT_MAX_EDGE_DIST = 'Bolt.MaxEdgeDist'
+
+
+KEY_OUT_DISP_EDGE_DIST = 'Edge Distance (mm)'
+
+
+KEY_OUT_SPTING_BOLT_SHEAR = 'Cleat.Spting_leg.Shear'
+KEY_OUT_SPTING_BOLT_BEARING = 'Cleat.Spting_leg.Bearing'
+KEY_OUT_SPTING_BOLT_CAPACITY = 'Cleat.Spting_leg.Capacity'
+KEY_OUT_SPTING_BOLT_FORCE = 'Cleat.Spting_leg.Force'
+KEY_OUT_SPTING_BOLT_LINE = 'Cleat.Spting_leg.Line'
+KEY_OUT_SPTING_BOLTS_REQUIRED = 'Cleat.Spting_leg.Required'
+
+KEY_OUT_SPTING_BOLT_GRP_CAPACITY = 'Cleat.Spting_leg.GroupCapacity'
+
+KEY_OUT_SPTING_BOLTS_ONE_LINE = 'Cleat.Spting_leg.OneLine'
+
+KEY_OUT_SPTING_SPACING = 'Cleat.Spting_leg.spacing'
+
+KEY_OUT_SPTING_PITCH = 'Cleat.Spting_leg.Pitch'
+
+KEY_OUT_SPTING_MIN_PITCH = 'Cleat.Spting_leg.MinPitch'
+KEY_OUT_SPTING_END_DIST = 'Cleat.Spting_leg.EndDist'
+KEY_OUT_SPTING_GAUGE = 'Cleat.Spting_leg.Gauge'
+KEY_OUT_SPTING_MIN_GAUGE = 'Cleat.Spting_leg.MinGauge'
+KEY_OUT_SPTING_MAX_SPACING = 'Cleat.Spting_leg.MaxGauge'
+KEY_OUT_SPTING_EDGE_DIST = 'Cleat.Spting_leg.EdgeDist'
+KEY_OUT_SPTING_MIN_EDGE_DIST = 'Cleat.Spting_leg.MinEdgeDist'
+KEY_OUT_SPTING_MAX_EDGE_DIST = 'Cleat.Spting_leg.MaxEdgeDist'
+
+
+KEY_OUT_DISP_PLATETHK_REP = 'Thickness (mm)'
+KEY_OUT_PLATETHK = 'Plate.Thickness'
+KEY_OUT_DISP_PLATETHK = 'Thickness (mm)'
+KEY_OUT_PLATE_HEIGHT = 'Plate.Height'
+KEY_OUT_DISP_PLATE_HEIGHT = 'Height (mm)'
+KEY_OUT_DISP_PLATE_MIN_HEIGHT = 'Min.Height (mm)'
+
+KEY_OUT_INTER_PLATE_HEIGHT = 'Plate.InterHeight'
+KEY_OUT_DISP_INTER_PLATE_HEIGHT = 'Height (mm)'
+
+
+KEY_OUT_INTER_PLATE_LENGTH = 'Plate.InterLength'
+KEY_OUT_DISP_INTER_PLATE_LENGTH = 'Length (mm)'
+
+
+KEY_OUT_INTERCONNECTION = 'Intermittent.Connection'
+KEY_OUT_DISP_INTERCONNECTION = 'Connection (nos)'
+
+KEY_OUT_INTERSPACING = 'Intermittent.Spacing'
+KEY_OUT_DISP_INTERSPACING = 'Spacing (mm)'
+
+
+KEY_OUT_PLATE_CAPACITY = 'Plate.Capacity'
+KEY_OUT_PLATE_LENGTH = 'Plate.Length'
+KEY_OUT_DISP_PLATE_LENGTH = 'Length (mm)'
+KEY_OUT_DISP_PLATE_MIN_LENGTH = 'Min.Plate Length (mm)'
+KEY_OUT_DISP_MEMB_MIN_LENGTH = 'Min.Member Length (mm)'
+
+KEY_OUT_PLATE_WIDTH = 'Plate.Width'
+KEY_OUT_DISP_PLATE_WIDTH = 'Width (mm)'
+c = 'Width (mm)'
+
+KEY_OUT_SEATED_ANGLE_DESIGNATION = "SeatedAngle.Designation"
+KEY_OUT_DISP_ANGLE_DESIGNATION = "Designation"
+KEY_OUT_SEATED_ANGLE_THICKNESS = "SeatedAngle.Thickness"
+KEY_OUT_DISP_SEATED_ANGLE_THICKNESS = "Leg Thickness (mm)"
+KEY_OUT_SEATED_ANGLE_LEGLENGTH = "SeatedAngle.LegLength"
+KEY_OUT_DISP_SEATED_ANGLE_LEGLENGTH = "Leg Length (mm)"
+KEY_OUT_SEATED_ANGLE_WIDTH = "SeatedAngle.Width"
+KEY_OUT_DISP_ANGLE_WIDTH = "Width (mm)"
+KEY_OUT_SEATED_ANGLE_BOLT_COL = "SeatedAngle.Bolt_Spacing_col"
+KEY_OUT_DISP_SEATED_ANGLE_BOLT_COL = "Bolt Spacing Details"
+KEY_OUT_SEATED_ANGLE_BOLT_BEAM = "SeatedAngle.Bolt_Spacing_beam"
+KEY_OUT_DISP_SEATED_ANGLE_BOLT_BEAM = "Bolt Spacing Details"
+
+KEY_OUT_TOP_ANGLE_DESIGNATION = "TopAngle.Designation"
+# KEY_OUT_DISP_TOP_ANGLE_DESIGNATION = "Designation"
+KEY_OUT_TOP_ANGLE_WIDTH = "TopAngle.Width"
+# KEY_OUT_DISP_TOP_ANGLE_WIDTH = "Width (mm)"
+KEY_OUT_TOP_ANGLE_BOLT_COL = "TopAngle.Bolt_Spacing_col"
+KEY_OUT_DISP_TOP_ANGLE_BOLT_COL = "Bolt Spacing Details"
+KEY_OUT_TOP_ANGLE_BOLT_BEAM = "TopAngle.Bolt_Spacing_beam"
+KEY_OUT_DISP_TOP_ANGLE_BOLT_BEAM = "Bolt Spacing Details"
+
+KEY_OUT_PLATE_SHEAR_DEMAND = 'Plate.ShearDemand'
+KEY_OUT_DISP_PLATE_SHEAR_DEMAND = 'Shear Demand (kN)'
+KEY_OUT_PLATE_SHEAR = 'Plate.Shear'
+KEY_OUT_DISP_PLATE_SHEAR = 'Shear Yielding Capacity (kN)'
+KEY_OUT_PLATE_YIELD = 'Plate.Yield'
+KEY_OUT_DISP_PLATE_YIELD = 'Yield Capacity'
+KEY_OUT_PLATE_RUPTURE = 'Plate.Rupture'
+KEY_OUT_DISP_PLATE_RUPTURE = 'Rupture Capacity (kN)'
+
+KEY_OUT_PLATE_BLK_SHEAR = 'Plate.BlockShear'
+KEY_OUT_DISP_PLATE_BLK_SHEAR = 'Block Shear Capacity (kN)'
+KEY_OUT_PLATE_MOM_DEMAND = 'Plate.MomDemand'
+KEY_OUT_DISP_PLATE_MOM_DEMAND = 'Moment Demand (kNm)'
+KEY_OUT_DISP_PLATE_MOM_DEMAND_SEP = 'Moment Demand per Bolt (kNm)'
+KEY_OUT_PLATE_MOM_CAPACITY = 'Plate.MomCapacity'
+KEY_OUT_DISP_PLATE_MOM_CAPACITY = 'Moment Capacity (kNm)'
+KEY_OUT_DISP_PLATE_MOM_CAPACITY_SEP = 'Moment Capacity per Bolt (kNm)'
+KEY_OUT_EP_MOM_CAPACITY = 'Plate.MomentCapacity'
+KEY_OUT_DISP_EP_MOM_CAPACITY = 'Moment Capacity (kNm)'
+
+KEY_OUT_PLATE_TENSION = 'Plate.TensionYield'
+
+KEY_OUT_DISP_PLATE_TENSION = 'Tension Yielding Capacity (kN)'
+
+KEY_OUT_PLATE_TENSION_RUP = 'Plate.TensionRupture'
+KEY_OUT_DISP_PLATE_TENSION_RUP = 'Tension Rupture Capacity (kN)'
+
+KEY_OUT_PLATE_BLK_SHEAR_AXIAL = 'Plate.BlockShearAxial'
+KEY_OUT_DISP_PLATE_BLK_SHEAR_AXIAL = 'Axial Block Shear Capacity (kN)'
+
+KEY_OUT_PLATE_CAPACITIES = 'capacities'
+KEY_OUT_DISP_PLATE_CAPACITIES = 'Capacity'
+
+KEY_OUT_WELD_SIZE = 'Weld.Size'
+KEY_OUT_DISP_WELD_SIZE = 'Size (mm)'
+
+KEY_OUT_INTER_WELD_SIZE = 'InterWeld.Size'
+KEY_OUT_DISP_INTER_WELD_SIZE = 'Size (mm)'
+
+KEY_OUT_WELD_SIZE_FLANGE = 'Weld.Size_flange'
+KEY_OUT_DISP_WELD_SIZE_FLANGE = 'Size at Flange (mm)'
+KEY_OUT_WELD_SIZE_WEB = 'Weld.Size_web'
+KEY_OUT_DISP_WELD_SIZE_WEB = 'Size at Web (mm)'
+KEY_OUT_WELD_SIZE_STIFFENER = 'Weld.Size_stiffener'
+KEY_OUT_DISP_WELD_SIZE_STIFFENER = 'Size at Stiffener (mm)'
+KEY_OUT_DISP_WELD_SIZE_STIFFENER1 = 'Weld Size at Stiffener (mm)'
+KEY_OUT_WELD_STRENGTH = 'Weld.Strength'
+KEY_OUT_DISP_WELD_STRENGTH = 'Strength (N/mm)'
+
+KEY_OUT_WELD_STRESS = 'Weld.Stress'
+KEY_OUT_DISP_WELD_STRESS = 'Stress (N/mm)'
+KEY_OUT_WELD_LENGTH = 'Weld.Length'
+KEY_OUT_DISP_WELD_LENGTH = 'Length (mm)'
+KEY_OUT_WELD_LENGTH_EFF = 'Weld.EffLength'
+KEY_OUT_DISP_WELD_LENGTH_EFF = 'Eff.Length (mm)'
+
+KEY_OUT_DISP_MEMB_TEN_YIELD = 'Tension Yield Capacity (KN)'
+KEY_OUT_DISP_MEMB_TEN_RUPTURE = 'Tension Rupture Capacity'
+KEY_OUT_DISP_MEMB_BLK_SHEAR = 'Block Shear Capacity'
+
+
+KEY_OUT_NO_BOLTS_FLANGE = 'ColumnEndPlate.nbf'
+KEY_OUT_NO_BOLTS_FLANGE_TOTAL = 'ColumnEndPlate.nbftotal'
+KEY_OUT_DISP_NO_BOLTS_FLANGE = 'No. of Bolts (along one side of the flange overhang) (n)'
+KEY_OUT_DISP_NO_BOLTS_FLANGE_TOTAL = 'No. of Bolts (along flange)'
+KEY_OUT_NO_BOLTS_WEB = 'ColumnEndPlate.nbw'
+KEY_OUT_NO_BOLTS_WEB_TOTAL = 'ColumnEndPlate.nbwtotal'
+
+KEY_OUT_DISP_NO_BOLTS_WEB = 'No. of Bolts (along one side of the web) (n)'
+KEY_OUT_DISP_NO_BOLTS_WEB_TOTAL = 'No. of Bolts (along web)'
+
+KEY_OUT_NO_BOLTS = 'ColumnEndPlate.nb'
+KEY_OUT_DISP_NO_BOLTS = 'Total No. of Bolts'
+KEY_PITCH_2_FLANGE = 'ColumnEndPlate.p2_flange'
+KEY_DISP_PITCH_2_FLANGE = 'Pitch2 along Flange'
+KEY_PITCH_2_WEB = 'ColumnEndPlate.p2_web'
+KEY_DISP_PITCH_2_WEB = 'Pitch2 along Web'
+
+KEY_PITCH_2_FLANGE1 = 'ColumnEndPlate.p2_flange'
+KEY_DISP_PITCH_2_FLANGE1 = 'Pitch (bolts along centre) (p2)'
+KEY_PITCH_2_WEB1 = 'ColumnEndPlate.p2_web'
+KEY_DISP_PITCH_2_WEB1 = 'Pitch along centre bolt (p2)'
+KEY_BOLT_FLANGE_SPACING = 'Bolt.flange_bolts'
+KEY_DISP_BOLT_FLANGE_SPACING = 'Flange Bolts Spacing'
+KEY_BOLT_WEB_SPACING = 'Bolt.web_bolts'
+KEY_DISP_BOLT_WEB_SPACING = 'Web Bolts Spacing'
+
+
+
+KEY_CONN_PREFERENCE = 'plate.design_method'
+KEY_DISP_CONN_PREFERENCE = 'Design Method'
+VALUES_CONN_PREFERENCE = ["Select","Plate Oriented", "Bolt Oriented"]
+KEY_OUT_STIFFENER_HEIGHT = 'Stiffener.height'
+KEY_OUT_DISP_STIFFENER_HEIGHT = 'Stiffener Height'
+KEY_OUT_STIFFENER_WIDTH = 'Stiffener.width'
+KEY_OUT_DISP_STIFFENER_WIDTH = 'Stiffener Width'
+KEY_OUT_STIFFENER_THICKNESS = 'Stiffener.thickness'
+KEY_OUT_DISP_STIFFENER_THICKNESS = 'Stiffener Thickness'
+KEY_OUT_WELD_TYPE = 'Stiffener.weld'
+KEY_OUT_WELD_TYPE1 = 'Stiffener.weld_flange'
+KEY_OUT_DISP_WELD_TYPE = 'Weld Between Stiffener and Column flange'
+KEY_OUT_DISP_WELD_TYPE1 = 'Weld Between Stiffener and End plate'
+KEY_OUT_STIFFENER_DETAILS = 'Stiffener.Details'
+KEY_OUT_STIFFENER_SKETCH = 'Stiffener.Sketch'
+KEY_OUT_BP_TYPICAL_SKETCH = 'BasePlate.Sketch'
+KEY_OUT_BP_TYPICAL_DETAILING = 'BasePlate.Detailing'
+KEY_OUT_DISP_BP_DETAILING = 'Typical Detailing'
+KEY_OUT_DISP_BP_DETAILING_SKETCH = 'Detailing'
+KEY_OUT_CONTINUITY_DETAILS = 'ContinuityPlate.Details'
+KEY_OUT_COL_WEB_STIFFENER_DETAILS = 'ColWebStiffenerPlate.Details'
+KEY_OUT_DISP_STIFFENER_DETAILS = 'Stiffener Plate'
+KEY_OUT_DISP_STIFFENER_DIMENSIONS = 'Dimensions'
+KEY_OUT_DISP_STIFFENER_SKETCH = 'Typical Sketch'
+KEY_OUT_DISP_CONTINUITY_PLATE_DETAILS = 'Continuity Plate'
+KEY_OUT_DISP_WEB_STIFFENER_PLATE_DETAILS = 'Web Stiffener Plate'
+KEY_OUT_STIFFENER_TITLE = 'Stiffener.Title'
+KEY_P2_WEB = 'Bolt.pitch2_web'
+KEY_P2_FLANGE = 'Bolt.pitch2_flange'
+KEY_Y_SQR = 'Bolt.y_sqr'
+KEY_BOLT_TENSION = 'Bolt.t_b'
+KEY_BOLT_SHEAR = 'Bolt.v_sb'
+KEY_PLATE_MOMENT = 'Plate.m_ep'
+KEY_OUT_STIFFENER_LENGTH = 'Stiffener.Length'
+KEY_OUT_STIFFENER_LENGTH_CHS = 'Stiffener.Length'
+KEY_OUT_CONTINUITY_PLATE_NOS = 'ContinuityPlate.Number'
+KEY_OUT_CONTINUITY_PLATE_LENGTH = 'ContinuityPlate.Length'
+KEY_OUT_CONTINUITY_PLATE_WIDTH = 'ContinuityPlate.Width'
+KEY_OUT_CONTINUITY_PLATE_THK = 'ContinuityPlate.Thickness'
+KEY_OUT_WEB_STIFFENER_PLATE_NOS = 'WebStiffener.Number'
+KEY_OUT_WEB_STIFFENER_PLATE_LENGTH = 'WebStiffener.Length'
+KEY_OUT_WEB_STIFFENER_PLATE_WIDTH = 'WebStiffener.Width'
+KEY_OUT_WEB_STIFFENER_PLATE_THK = 'WebStiffener.Thickness'
+KEY_OUT_DISP_STIFFENER_LENGTH = 'Length (mm)'
+KEY_OUT_DISP_CONTINUITY_PLATE_NUMBER = 'Number of Continuity Plate(s)'
+KEY_OUT_DISP_WEB_STIFFENER_PLATE_NUMBER = 'Number of Stiffener(s)'
+KEY_OUT_DISP_CONTINUITY_PLATE_LENGTH = 'Length (mm)'
+KEY_OUT_DISP_WEB_PLATE_PLATE_DEPTH = 'Depth (mm)'
+KEY_OUT_DISP_CONTINUITY_PLATE_WIDTH = 'Width (mm)'
+KEY_OUT_DISP_CONTINUITY_PLATE_THK = 'Thickness (mm)'
+KEY_OUT_STIFFENER_HEIGHT = 'Stiffener.Height'
+KEY_OUT_STIFFENER_HEIGHT_CHS = 'Stiffener.Height'
+KEY_OUT_STIFFENER_WIDTH = 'Stiffener.Width'
+KEY_OUT_DISP_STIFFENER_HEIGHT = 'Height (mm)'
+KEY_OUT_DISP_STIFFENER_WIDTH = 'Width (mm)'
+KEY_OUT_STIFFENER_THICKNESS = 'Stiffener.Thickness'
+KEY_OUT_STIFFENER_THICKNESS_CHS = 'Stiffener.Thickness'
+KEY_OUT_DISP_STIFFENER_THICKNESS = 'Thickness (mm)'
+
+KEY_OUT_DISP_LOCAL_WEB_YIELDING = 'Local Web Yielding'
+KEY_OUT_DISP_COMP_BUCKLING_WEB = 'Compression Buckling of Web'
+KEY_OUT_DISP_WEB_CRIPPLING = 'Web Crippling'
+KEY_OUT_DISP_COMP_STRENGTH = 'Compression Strength (kN)'
+#Continuity Plate
+KEY_OUT_DISP_CONT_PLATE_REQ = 'Continuity Plate Required?'
+KEY_OUT_DISP_DIAG_PLATE_REQ = 'Web Stiffener Plate Required?'
+KEY_OUT_DISP_AREA_REQ= "Area Required (mm2)"
+KEY_OUT_DISP_NOTCH_SIZE ="Notch Size (mm)"
+KEY_OUT_DISP_DIAG_LOAD_STIFF="Load taken by Stiffener"
+KEY_OUT_DISP_DIAGONAL_PLATE_DEPTH = 'Depth (mm)'
+KEY_OUT_DISP_DIAGONAL_PLATE_WIDTH = 'Width (mm)'
+# KEY_OUT_DISP_WEB_PLATE_CONT_T
+
+
+
+KEY_OUT_WELD_DETAILS = 'Weld.Details'
+DISP_TITLE_WELD = 'Weld'
+DISP_TITLE_WELD_FLANGE = 'Weld at Flange'
+DISP_TITLE_WELD_TYPICAL_DETAIL = 'Typical Sketch'
+DISP_TITLE_WELD_WEB = 'Weld at Web'
+KEY_OUT_WELD_SIZE = 'Weld.Size'
+KEY_OUT_WELD_DETAILS = 'Weld.Details'
+KEY_OUT_WELD_TYPE = 'Weld.Type'
+KEY_OUT_DISP_WELD_SIZE = 'Size (mm)'
+KEY_OUT_DISP_WELD_SIZE_EP = 'Size (mm)'
+KEY_OUT_DISP_WELD_TYPE = 'Type'
+KEY_OUT_WELD_STRENGTH = 'Weld.Strength'
+KEY_OUT_DISP_WELD_STRENGTH = 'Strength (N/mm2)'
+
+KEY_OUT_WELD_STRESS = 'Weld.Stress'
+KEY_OUT_WELD_STRESS_NORMAL = 'Weld.NormalStress'
+KEY_OUT_WELD_STRESS_SHEAR = 'Weld.ShearStress'
+KEY_OUT_WELD_STRESS_COMBINED = 'Weld.StressCombined'
+KEY_OUT_DISP_WELD_STRESS_COMBINED = 'Combined Stress (N/mm2)'
+KEY_OUT_DISP_WELD_STRESS_EQUIVALENT = 'Equivalent Stress (N/mm2)'
+KEY_OUT_DISP_WELD_STRESS = 'Stress (N/mm)'
+KEY_OUT_DISP_WELD_NORMAL_STRESS = 'Normal Stress (N/mm2)'
+KEY_OUT_DISP_WELD_SHEAR_STRESS = 'Shear Stress (N/mm2)'
+KEY_OUT_DISP_WELD_STRESS_AXIAL = 'Weld.Stress due to axial force'
+KEY_OUT_DISP_WELD_STRESS_SHEAR = 'Weld.Stress due to shear force'
+KEY_OUT_DISP_WEB_WELD_LENGTH = 'Web Weld Length (mm)'
+KEY_OUT_WELD_LENGTH = 'Weld.Length'
+KEY_OUT_DISP_WELD_LENGTH = 'Total Length (mm)'
+KEY_OUT_WELD_LENGTH_EFF = 'Weld.EffLength'
+KEY_OUT_DISP_WELD_LENGTH_EFF = 'Eff.Length (mm)'
+KEY_OUT_WELD_STRENGTH_RED = 'Weld.Strength_red'
+KEY_OUT_DISP_WELD_STRENGTH_RED = 'Red.Strength (N/mm)'
+
+DISP_OUT_TITLE_SPTDLEG = "Bolts on Supported Leg"
+DISP_OUT_TITLE_SPTINGLEG = "Bolts on Supporting Leg"
+DISP_OUT_TITLE_CLEAT = "Cleat Angle"
+KEY_OUT_CLEAT_SECTION = "Cleat.Angle"
+KEY_OUT_DISP_CLEAT_SECTION = "Cleat Angle Designation"
+KEY_OUT_CLEATTHK = 'Plate.Thickness'
+KEY_OUT_DISP_CLEATTHK = 'Thickness (mm)'
+KEY_OUT_CLEAT_HEIGHT = 'Plate.Height'
+KEY_OUT_DISP_CLEAT_HEIGHT = 'Height (mm)'
+KEY_OUT_CLEAT_SPTDLEG = 'Cleat.SupportedLength'
+KEY_OUT_DISP_CLEAT_SPTDLEG = 'Length (mm)'
+KEY_OUT_CLEAT_SPTINGLEG = 'Cleat.SupportingLength'
+KEY_OUT_DISP_CLEAT_SPTINGLEG = 'Length (mm)'
+
+KEY_OUT_CLEAT_SHEAR = 'Cleat.Shear'
+KEY_OUT_DISP_CLEAT_SHEAR = 'Shear '
+KEY_OUT_CLEAT_BLK_SHEAR = 'Cleat.BlockShear'
+
+KEY_OUT_CLEAT_MOM_DEMAND = 'Cleat.MomDemand'
+
+KEY_OUT_CLEAT_MOM_CAPACITY = 'Cleat.MomCapacity'
+
+
+
+KEY_DISP_SEC_PROFILE = 'Section Profile*'
+KEY_DISP_SEC_TYPE = 'Section Type'
+VALUES_SEC_PROFILE = ['Beams and Columns', 'RHS and SHS', 'CHS'] #,'Channels', 'Back to Back Channels'
+VALUES_SEC_PROFILE_2 = ['Angles', 'Back to Back Angles', 'Star Angles', 'Channels', 'Back to Back Channels']
+#, 'Channels', 'Back to Back Channels'
+VALUES_SEC_PROFILE3 = ['Beams and Columns'] #,'Channels', 'Back to Back Channels'
+VALUES_SEC_PROFILE4 = ['Channels']
+KEY_LENZZ = 'Member.Length_zz'
+KEY_DISP_LENZZ = 'Length (z-z)(mm)*'
+
+
+KEY_LENYY = 'Member.Length_yy'
+KEY_DISP_LENYY = 'Length (y-y)(mm)*'
+
+DISP_TITLE_SC = 'Supporting Condition'
+DISP_TITLE_STRUT = 'End Condition *'
+KEY_END1 = 'End_1'
+KEY_END1_Y = 'End_1_Y'
+KEY_DISP_END1 = 'End 1 *'
+KEY_DISP_END1_Y = 'End 1 *'
+VALUES_END1 = ['Fixed', 'Free', 'Hinged', 'Roller']
+VALUES_STRUT_END1 = ['Fixed', 'Hinged']
+VALUES_END1_Y = ['Fixed', 'Free', 'Hinged', 'Roller']
+VALUES_STRUT_END1_Y = ['Fixed', 'Hinged']
+
+KEY_END2 = 'End_2'
+KEY_END2_Y = 'End_2_Y'
+KEY_DISP_END2 = 'End 2 *'
+KEY_DISP_END2_Y = 'End 2 *'
+VALUES_END2 = ['Fixed', 'Free', 'Hinged', 'Roller']
+VALUES_STRUT_END2 = ['Fixed', 'Hinged']
+VALUES_END2_Y = ['Fixed', 'Free', 'Hinged', 'Roller']
+VALUES_STRUT_END2_Y = ['Fixed', 'Hinged']
+
+KEY_END_CONDITION = 'End Condition'
+KEY_DISP_END_CONDITION = 'End Condition (Major Axis z-z axis)'
+KEY_DISP_END_CONDITION_2 = 'End Condition (Minor Axis y-y axis)'
+DISP_TITLE_CLEAT = 'Cleat Angle'
+DISP_TITLE_ANGLE = 'Angle Section'
+DISP_TITLE_CHANNEL = 'Channel Section'
+KEY_CLEATHT='CleatHt'
+KEY_DISP_CLEATHT='Height(mm)'
+KEY_DISP_CLEATSEC='Cleat Section *'
+KEY_DISP_SEATEDANGLE = 'Seated Angle *'
+KEY_DISP_TOPANGLE = 'Top Angle *'
+#Design Report Strings
+DISP_NUM_OF_BOLTS = 'No. of Bolts'
+DISP_NUM_OF_ROWS = 'No. of Bolt Rows'
+DISP_NUM_OF_COLUMNS = 'No. of Bolt Columns'
+DISP_TITLE_COMPMEM='Compression member'
+KEY_SECTYPE = 'Section Type'
+KEY_DISP_SECTYPE = 'Section Type*'
+KEY_DISP_SECSIZE = 'Section Designation*'
+KEY_DISP_SECSIZE_REPORT = 'Section Size'
+KEY_LENMEM = 'Length of Member'
+KEY_DISP_LENMEM = 'Length of Member'
+DISP_TITLE_FL = 'Factored loads'
+KEY_AXFOR = 'Axial Force'
+KEY_DISP_AXFOR = 'Axial Force (kN)*'
+KEY_PLTHK = 'Plate thk'
+KEY_PK_PLTHK = 'PackingPlate thk'
+KEY_DISP_PLTHK = 'Plate thk (mm)'
+KEY_DISP_PK_PLTHK = 'Packing Plate thickness (mm)'
+KEY_PLTHICK = 'Plate thk'
+KEY_DISP_PLTHICK = 'Plate Thickness (mm)'
+KEY_DISP_PLATE_THICK = 'Plate Thickness (mm)'
+KEY_DIAM = 'Diameter'
+KEY_DISP_DIAM = 'Diameter (mm)'
+KEY_NOROWS = 'No of Rows of Bolts'
+KEY_DISP_NOROWS = 'No of Rows of Bolts'
+KEY_NOCOLS = 'No of Column of Bolts'
+KEY_DISP_NOCOLS = 'No of Column of Bolts'
+KEY_ROWPI = 'Row Pitch'
+KEY_DISP_ROWPI = 'Row Pitch'
+KEY_COLPI = 'Column Pitch'
+KEY_DISP_COLPI = 'Column Pitch'
+KEY_ENDDIST = 'End Distance'
+KEY_DISP_ENDDIST = 'End Distance'
+KEY_EDGEDIST = 'Edge Distance'
+KEY_DISP_EDGEDIST = 'Edge Distance'
+KEY_CONNLOC = 'Conn Location'
+KEY_DISP_CONNLOC = 'Conn Location'
+KEY_LEN_INLINE = 'Total length in line with tension'
+KEY_DISP_LEN_INLINE = 'Total Length in line with tension'
+KEY_LEN_OPPLINE = 'Total length opp line with tension'
+KEY_DISP_LEN_OPPLINE = 'Total Length opp line with tension'
+
+try:
+  VALUES_ANGLESEC_CUSTOMIZED= connectdb("Angles", call_type="popup")
+except Exception as e:
+    print(f"Warning: Could not load Angles from database: {e}")
+    VALUES_ANGLESEC_CUSTOMIZED = []
+
+def get_available_cleat_list(input_angle_list, max_leg_length=math.inf, min_leg_length=0.0, position="outer"):
+
+    available_angles = []
+    for designation in input_angle_list:
+        leg_a_length,leg_b_length,t,r_r = get_leg_lengths(designation)
+        if position == "inner":
+            min_leg_length_outer = min_leg_length + t + r_r
+            max_leg_length_outer = max_leg_length + t + r_r
         else:
-            pass
-
-        bolt_dia = int(A.bolt.bolt_diameter_provided)
-        bolt_r = bolt_dia / 2.0
-        bolt_R = self.boltHeadDia_Calculation(bolt_dia) / 2.0
-        bolt_T = self.boltHeadThick_Calculation(bolt_dia)
-        bolt_Ht = self.boltLength_Calculation(bolt_dia)
-        nut_T = self.nutThick_Calculation(bolt_dia)  # bolt_dia = nut_dia
-        nut_Ht = bolt_dia
-        notch_height = A.supported_section.notch_ht
-        notch_R1 = max([A.supporting_section.root_radius, A.supported_section.root_radius, 10])
-
-        ##### SECONDARY BEAM PARAMETERS ######
-
-
-        # --Notch dimensions
-        if self.connection == KEY_DISP_FINPLATE or self.connection == 'FinPlateConnection':
-            gap = A.plate.gap
-            notchObj = Notch(R1=notch_R1,
-                             height=notch_height,
-                             # width= (pBeam_B/2.0 - (pBeam_tw/2.0 ))+ gap,
-                             width=(A.supporting_section.flange_width / 2.0 - (
-                                         A.supporting_section.web_thickness / 2.0 + gap)) + gap,
-                             length=A.supported_section.flange_width)
-
-        elif self.connection == KEY_DISP_CLEATANGLE:
-            gap = A.cleat.gap
-            notchObj = Notch(R1=notch_R1,
-                             height=notch_height,
-                             width=(A.supporting_section.flange_width / 2.0 - (
-                                     A.supporting_section.web_thickness / 2.0 + gap)) + gap,
-                             length=A.supported_section.flange_width)
-            # print(notch_R1,notch_height,(A.supporting_section.flange_width / 2.0 -
-            #                              (A.supporting_section.web_thickness / 2.0 + gap)) + gap, A.supported_section.flange_width)
-
-        elif self.connection == KEY_DISP_ENDPLATE or self.connection == 'EndPlateConnection':
-            print(f"CAD - EndPlate notch in create3DBeamWebBeamWeb")
-            notchObj = Notch(R1=notch_R1, height=notch_height,
-                             width=(A.supporting_section.flange_width / 2.0 - (
-                                     A.supporting_section.web_thickness / 2.0 + A.plate.thickness_provided)) + A.plate.gap,
-                             length=A.supported_section.flange_width)
-
-        else:
-            pass
-            # column = ISectionold(B = 83, T = 14.1, D = 250, t = 11, R1 = 12, R2 = 3.2, alpha = 98, length = 1000)
-            #
-            # beam = ISectionold(B = 140, T = 16,D = 400,t = 8.9, R1 = 14, R2 = 7, alpha = 98,length = 500)
-
-        supporting = ISection(B=A.supporting_section.flange_width, T=A.supporting_section.flange_thickness,
-                              D=A.supporting_section.depth, t=A.supporting_section.web_thickness,
-                              R1=A.supporting_section.root_radius, R2=A.supporting_section.toe_radius,
-                              alpha=A.supporting_section.flange_slope,
-                              length=1000, notchObj=None)
-
-        supported = ISection(B=A.supported_section.flange_width, T=A.supported_section.flange_thickness,
-                             D=A.supported_section.depth,
-                             t=A.supported_section.web_thickness, R1=A.supported_section.root_radius,
-                             R2=A.supported_section.toe_radius,
-                             alpha=A.supported_section.flange_slope, length=500, notchObj=notchObj)
-
-        # bolt = Bolt(R = bolt_R,T = bolt_T, H = 38.0, r = 4.0 )
-        bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)
-
-        # nut =Nut(R = bolt_R, T = 10.0,  H = 11, innerR1 = 4.0, outerR2 = 8.3)
-        nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)
-
-        if self.connection == KEY_DISP_FINPLATE or self.connection == 'FinPlateConnection':  # finBeamWebBeamWeb/endBeamWebBeamWeb
-            nut_space = A.supported_section.web_thickness + A.plate.thickness_provided + nut_T
-            nutBoltArray = finNutBoltArray(A.bolt,  A.plate, nut, bolt, nut_space)
-            beamwebconn = FinBeamWebBeamWeb(supporting, supported, notchObj, plate, Fweld1, nutBoltArray, gap)
-            # column, beam, notch, plate, Fweld, nut_bolt_array
-
-        elif self.connection == KEY_DISP_ENDPLATE or self.connection == 'EndPlateConnection':
-            print(f"CAD - EndPlate bolt array in create3DBeamWebBeamWeb")
-            nut_space = A.supporting_section.web_thickness + A.plate.thickness_provided + nut_T
-            nutBoltArray = endNutBoltArray(A.bolt, A.plate, nut, bolt, nut_space)
-            beamwebconn = EndBeamWebBeamWeb(supporting, supported, notchObj, Fweld1, plate, nutBoltArray)
-
-        elif self.connection == KEY_DISP_CLEATANGLE:
-            # nut_space = sBeam_tw + 2 * cleat_thick + nut_T
-            # cnut_space = pBeam_tw + cleat_thick + nut_T
-            # nut_bolt_array = cleatNutBoltArray(self.resultObj, nut, bolt, nut_space, cnut_space)
-            # beamwebconn = cleatBeamWebBeamWeb(column, beam, notchObj, angle, nut_bolt_array,gap)
-            nut_space = A.supported_section.web_thickness + 2 * A.cleat.thickness + nut_T
-            cnut_space = A.supporting_section.web_thickness + A.cleat.thickness + nut_T
-            nut_bolt_array = cleatNutBoltArray(A.cleat, nut, bolt, nut_space, cnut_space)
-            beamwebconn = cleatBeamWebBeamWeb(supporting, supported, notchObj, angle, nut_bolt_array,gap)
-
-        else:
-            pass
-
-        beamwebconn.create_3dmodel()
-
-        return beamwebconn
-
-    def create3DColWebBeamWeb(self):
-        '''
-        creating 3d cad model with column web beam web
-
-        '''
-
-        A = self.module_class
-
-        # if self.connection == KEY_DISP_FINPLATE:
-            # A = self.module_class()
-            # A = FinPlateConnection()
-        if self.connection == KEY_DISP_CLEATANGLE:
-            # A = CleatAngleConnection()
-            angle = Angle(L=A.cleat.height, A=A.cleat.leg_a_length, B=A.cleat.leg_b_length, T=A.cleat.thickness,
-                          R1=A.cleat.root_radius, R2=A.cleat.toe_radius)
-
-        elif self.connection == KEY_DISP_SEATED_ANGLE or self.connection == 'Seated-Angle-Connection':
-            print(f"CAD - SeatedAngle setup in create3DColWebBeamWeb")
-            angle = Angle(L=A.seated_angle.width, A=A.seated.leg_a_length, B=A.seated.leg_b_length,
-                          T=A.seated.thickness, R1=A.seated.root_radius, R2=A.seated.toe_radius)
-        else:
-            pass
-        #### PLATE,BOLT,ANGLE AND NUT PARAMETERS #####
-
-        # if self.connection == "cleatAngle":
-        #     cleat_length = self.resultObj['cleat']['height']
-        #     cleat_thick = float(self.dictangledata["t"])
-        #     cleat_legsizes = str(self.dictangledata["AXB"])
-        #     angle_A = int(cleat_legsizes.split('x')[0])
-        #     angle_B = int(cleat_legsizes.split('x')[1])
-        #     angle_r1 = float(str(self.dictangledata["R1"]))
-        #     angle_r2 = float(str(self.dictangledata["R2"]))
-        #
-        # elif self.connection == 'SeatedAngle':
-        #     seat_length = self.resultObj['SeatedAngle']['Length (mm)']
-        #     seat_thick = float(self.dictangledata["t"])
-        #     seat_legsizes = str(self.dictangledata["AXB"])
-        #     seatangle_A = int(seat_legsizes.split('x')[0])
-        #     seatangle_B = int(seat_legsizes.split('x')[1])
-        #     seatangle_r1 = float(str(self.dictangledata["R1"]))
-        #     seatangle_r2 = float(str(self.dictangledata["R2"]))
-        #
-        #     topangle_length = self.resultObj['SeatedAngle']['Length (mm)']
-        #     topangle_thick = float(self.dicttopangledata["t"])
-        #     top_legsizes = str(self.dicttopangledata["AXB"])
-        #     topangle_A = int(top_legsizes.split('x')[0])
-        #     topangle_B = int(top_legsizes.split('x')[1])
-        #     topangle_r1 = float(str(self.dicttopangledata["R1"]))
-        #     topangle_r2 = float(str(self.dicttopangledata["R2"]))
-        # else:
-        #     fillet_length = self.resultObj['Plate']['height']
-        #     fillet_thickness = str(self.uiObj['Weld']['Size (mm)'])
-        #     plate_width = self.resultObj['Plate']['width']
-        #     plate_thick = str(self.uiObj['Plate']['Thickness (mm)'])
-
-        bolt_dia = int(A.bolt.bolt_diameter_provided)
-        bolt_r = bolt_dia / 2.0
-        bolt_R = self.boltHeadDia_Calculation(bolt_dia) / 2.0
-        bolt_T = self.boltHeadThick_Calculation(bolt_dia)
-        bolt_Ht = self.boltLength_Calculation(bolt_dia)
-        nut_T = self.nutThick_Calculation(bolt_dia)  # bolt_dia = nut_dia
-        nut_Ht = bolt_dia
-        # notch_height = A.supported_section.notch_ht
-        # notch_R1 = max([A.supporting_section.root_radius, A.supported_section.root_radius, 10])
-
-        if self.connection == KEY_DISP_CLEATANGLE:
-            gap = A.cleat.gap
-            # notchObj = Notch(R1=notch_R1,
-            #                  height=notch_height,
-            #                  width=(A.supporting_section.flange_width / 2.0 - (
-            #                          A.supporting_section.web_thickness / 2.0 + gap)) + gap,
-            #                  length=A.supported_section.flange_width)
-            # print(notch_R1, notch_height, (A.supporting_section.flange_width / 2.0 -
-            #                                (A.supporting_section.web_thickness / 2.0 + gap)) + gap,
-            #       A.supported_section.flange_width)
-        elif self.connection == KEY_DISP_SEATED_ANGLE or self.connection == 'Seated-Angle-Connection':
-            print(f"CAD - SeatedAngle components in create3DColWebBeamWeb")
-            gap = A.plate.gap
-            seatangle = Angle(L=A.seated_angle.width, A=A.seated.leg_a_length, B=A.seated.leg_b_length,     #TODO:Check leg b length
-                              T=A.seated.thickness, R1=A.seated.root_radius, R2=A.seated.toe_radius)
-            topclipangle = Angle(L=A.top_angle.width, A=A.top_angle.leg_a_length, B=A.top_angle.leg_b_length,
-                                 T=A.top_angle.thickness, R1=A.top_angle.root_radius, R2=A.top_angle.toe_radius)
-
-        elif self.connection == KEY_DISP_ENDPLATE or self.connection == 'EndPlateConnection':
-            print(f"CAD - EndPlate setup in create3DColWebBeamWeb")
-            plate = Plate(L=A.plate.height, W=A.plate.width, T=A.plate.thickness_provided)
-            Fweld1 = FilletWeld(L=A.weld.length, b=A.weld.size, h=A.weld.size)
-
-        else:
-            plate = Plate(L=A.plate.height, W=A.plate.length, T=A.plate.thickness_provided)
-            Fweld1 = FilletWeld(L=A.weld.length, b=A.weld.size, h=A.weld.size)
-
-        supporting = ISection(B=A.supporting_section.flange_width, T=A.supporting_section.flange_thickness,
-                              D=A.supporting_section.depth, t=A.supporting_section.web_thickness,
-                              R1=A.supporting_section.root_radius, R2=A.supporting_section.toe_radius,
-                              alpha=A.supporting_section.flange_slope,
-                              length=max(1000, (500 + A.supported_section.depth)), notchObj=None)
-        supported = ISection(B=A.supported_section.flange_width, T=A.supported_section.flange_thickness,
-                             D=A.supported_section.depth,
-                             t=A.supported_section.web_thickness, R1=A.supported_section.root_radius,
-                             R2=A.supported_section.toe_radius,
-                             alpha=A.supported_section.flange_slope, length=500, notchObj=None)
-
-        bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)
-        nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)
-
-        if self.connection == KEY_DISP_FINPLATE or self.connection == 'FinPlateConnection':  # finColWebBeamWeb
-            gap = A.plate.gap
-            nut_space = A.supported_section.web_thickness + int(A.plate.thickness_provided) + nut_T
-            nutBoltArray = finNutBoltArray(A.bolt, A.plate, nut, bolt, nut_space)
-            colwebconn = FinColWebBeamWeb(supporting, supported, Fweld1, plate, nutBoltArray,gap)
-
-        elif self.connection == KEY_DISP_ENDPLATE or self.connection == 'EndPlateConnection':
-            print(f"CAD - EndPlate bolt array in create3DColWebBeamWeb")
-            nut_space = A.supporting_section.web_thickness + int(A.plate.thickness_provided) + nut_T
-            nutBoltArray = endNutBoltArray(A.bolt, A.plate, nut, bolt, nut_space)
-            colwebconn = EndColWebBeamWeb(supporting, supported, Fweld1, plate, nutBoltArray)
-
-        elif self.connection == KEY_DISP_CLEATANGLE:
-            # nut_space = beam_tw + 2 * cleat_thick + nut_T
-            # cnut_space = column_tw + cleat_thick + nut_T
-            # nut_bolt_array = cleatNutBoltArray(self.resultObj, nut, bolt, nut_space, cnut_space)
-            # colwebconn = cleatColWebBeamWeb(column, beam, angle, nut_bolt_array,gap)
-            nut_space = A.supported_section.web_thickness + 2 * A.cleat.thickness + nut_T
-            cnut_space = A.supporting_section.web_thickness + A.cleat.thickness + nut_T
-            nut_bolt_array = cleatNutBoltArray(A.cleat, nut, bolt, nut_space, cnut_space)
-            colwebconn = cleatColWebBeamWeb(supporting, supported, angle, nut_bolt_array, gap)
-
-        else:
-            snut_space = A.supporting_section.web_thickness + A.seated.thickness + nut_T
-            sbnut_space = A.supported_section.flange_thickness + A.seated.thickness + nut_T
-            tnut_space = A.supported_section.flange_thickness + A.top_angle.thickness + nut_T
-            tbnut_space = A.supporting_section.web_thickness + A.top_angle.thickness + nut_T
-
-            nutBoltArray = seatNutBoltArray(A.bolt, nut, bolt, snut_space, sbnut_space, tnut_space, tbnut_space)
-            colwebconn = seatColWebBeamWeb(supporting, supported, seatangle, topclipangle, nutBoltArray, gap)
-
-        colwebconn.create_3dmodel()
-        return colwebconn
-
-    def create3DColFlangeBeamWeb(self):
-        '''
-        Creating 3d cad model with column flange beam web connection
-
-        '''
-
-        A = self.module_class
-        print(f"CAD - create3DColFlangeBeamWeb called")
-        print(f"CAD - self.connection: {self.connection}")
-        print(f"CAD - A type: {type(A)}")
-        print(f"CAD - Has cleat: {hasattr(A, 'cleat')}")
-        print(f"CAD - Has plate: {hasattr(A, 'plate')}")
-
-        if self.connection == KEY_DISP_FINPLATE or self.connection == 'FinPlateConnection':
-            # A = self.module_class()
-            # A = FinPlateConnection()
-            gap = A.plate.gap
-        elif self.connection == KEY_DISP_CLEATANGLE or self.connection == 'CleatAngleConnection' or 'cleat' in self.connection.lower():
-            # A = CleatAngleConnection()
-            print(f"CAD - First block CleatAngle branch selected")
-            angle = Angle(L=A.cleat.height, A=A.cleat.leg_a_length, B=A.cleat.leg_b_length, T=A.cleat.thickness,
-                          R1=A.cleat.root_radius, R2=A.cleat.toe_radius)
-        elif self.connection == KEY_DISP_SEATED_ANGLE or self.connection == 'Seated-Angle-Connection':
-            print(f"CAD - SeatedAngle setup in create3DColFlangeBeamWeb")
-            angle = Angle(L=A.seated_angle.width, A=A.seated.leg_a_length, B=A.seated.leg_b_length,
-                          T=A.seated.thickness, R1=A.seated.root_radius, R2=A.seated.toe_radius)
-        else:
-            pass
-
-        bolt_dia = int(A.bolt.bolt_diameter_provided)
-        bolt_r = bolt_dia / 2.0
-        bolt_R = self.boltHeadDia_Calculation(bolt_dia) / 2.0
-        bolt_T = self.boltHeadThick_Calculation(bolt_dia)
-        bolt_Ht = self.boltLength_Calculation(bolt_dia)
-        nut_T = self.nutThick_Calculation(bolt_dia)  # bolt_dia = nut_dia
-        nut_Ht = bolt_dia
-        # gap = A.plate.gap
-        # notch_height = A.supported_section.notch_ht
-        # notch_R1 = max([A.supporting_section.root_radius, A.supported_section.root_radius, 10])
-
-        if self.connection == KEY_DISP_CLEATANGLE or self.connection == 'CleatAngleConnection' or 'cleat' in self.connection.lower():
-            print(f"CAD - Second block CleatAngle branch selected")
-            gap = A.cleat.gap
-            # notchObj = Notch(R1=notch_R1,
-            #                  height=notch_height,
-            #                  width=(A.supporting_section.flange_width / 2.0 - (
-            #                          A.supporting_section.web_thickness / 2.0 + gap)) + gap,
-            #                  length=A.supported_section.flange_width)
-            # print(notch_R1, notch_height, (A.supporting_section.flange_width / 2.0 -
-            #                                (A.supporting_section.web_thickness / 2.0 + gap)) + gap,
-            #       A.supported_section.flange_width)
-
-        elif self.connection == KEY_DISP_SEATED_ANGLE or self.connection == 'Seated-Angle-Connection':
-            print(f"CAD - SeatedAngle components in create3DColFlangeBeamWeb")
-            gap = A.plate.gap
-            seatangle = Angle(L=A.seated_angle.width, A=A.seated.leg_a_length, B=A.seated.leg_b_length,     #TODO:Check leg b length
-                              T=A.seated.thickness, R1=A.seated.root_radius, R2=A.seated.toe_radius)
-            topclipangle = Angle(L=A.top_angle.width, A=A.top_angle.leg_a_length, B=A.top_angle.leg_b_length,
-                                 T=A.top_angle.thickness, R1=A.top_angle.root_radius, R2=A.top_angle.toe_radius)
-
-        elif self.connection == KEY_DISP_ENDPLATE or self.connection == 'EndPlateConnection':
-            print(f"CAD - EndPlate component setup branch selected")
-            plate = Plate(L=A.plate.height, W=A.plate.width, T=A.plate.thickness_provided)
-            Fweld1 = FilletWeld(L=A.weld.length, b=A.weld.size, h=A.weld.size)
-        else:
-            # plate = Plate(L= 300,W =100, T = 10)
-            plate = Plate(L=A.plate.height, W=A.plate.length, T=A.plate.thickness_provided)
-
-            # Fweld1 = FilletWeld(L= 300,b = 6, h = 6)
-            Fweld1 = FilletWeld(L=A.weld.length, b=A.weld.size, h=A.weld.size)
-
-        supported = ISection(B=A.supported_section.flange_width, T=A.supported_section.flange_thickness,
-                             D=A.supported_section.depth,
-                             t=A.supported_section.web_thickness, R1=A.supported_section.root_radius,
-                             R2=A.supported_section.toe_radius,
-                             alpha=A.supported_section.flange_slope, length=500, notchObj=None)
-
-        supporting = ISection(B=A.supporting_section.flange_width, T=A.supporting_section.flange_thickness,
-                              D=A.supporting_section.depth, t=A.supporting_section.web_thickness,
-                              R1=A.supporting_section.root_radius, R2=A.supporting_section.toe_radius,
-                              alpha=A.supporting_section.flange_slope,
-                              length=max(1000, (500 + A.supported_section.depth)), notchObj=None)
-
-        # bolt = Bolt(R = bolt_R,T = bolt_T, H = 38.0, r = 4.0 )
-        bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)
-
-        # nut =Nut(R = bolt_R, T = 10.0,  H = 11, innerR1 = 4.0, outerR2 = 8.3)
-        nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)
-
-        if self.connection == KEY_DISP_FINPLATE or self.connection == 'FinPlateConnection':
-            nut_space = A.supported_section.web_thickness+ int(A.plate.thickness_provided) + nut_T
-            # nutBoltArray = finNutBoltArray(A, nut, bolt, nut_space)  # finColFlangeBeamWeb
-            # colflangeconn = finColFlangeBeamWeb(column, beam, Fweld1, plate, nutBoltArray, gap)
-
-            nutBoltArray = finNutBoltArray(A.bolt, A.plate, nut, bolt, nut_space)
-            colflangeconn = FinColFlangeBeamWeb(supporting, supported, Fweld1, plate, nutBoltArray,gap)
-
-        elif self.connection == KEY_DISP_ENDPLATE or self.connection == 'EndPlateConnection':
-            print(f"CAD - EndPlate bolt array branch selected")
-            nut_space = A.supporting_section.flange_thickness + int(A.plate.thickness_provided) + nut_T
-            nutBoltArray = endNutBoltArray(A.bolt, A.plate, nut, bolt, nut_space)
-            colflangeconn = EndColFlangeBeamWeb(supporting, supported, Fweld1, plate, nutBoltArray)
-
-        elif self.connection == KEY_DISP_CLEATANGLE or self.connection == 'CleatAngleConnection' or 'cleat' in self.connection.lower():
-            print(f"CAD - CleatAngle branch selected, connection: {self.connection}")
-            print(f"CAD - A.cleat exists: {hasattr(A, 'cleat')}")
-            if hasattr(A, 'cleat'):
-                print(f"CAD - A.cleat.thickness: {A.cleat.thickness}")
-                print(f"CAD - A.cleat.height: {A.cleat.height}")
-            
-            # nut_space =  A.supported_section.web_thickness + 2 *  + nut_T
-            # cnut_space = column_T + cleat_thick + nut_T
-            # nut_bolt_array = cleatNutBoltArray(self.resultObj, nut, bolt, nut_space, cnut_space)
-            # colflangeconn = cleatColFlangeBeamWeb(column, beam, angle, nut_bolt_array,gap)
-            nut_space = A.supported_section.web_thickness + 2 * A.cleat.thickness + nut_T
-            cnut_space = A.supporting_section.flange_thickness + A.cleat.thickness + nut_T
-            nut_bolt_array = cleatNutBoltArray(A.cleat, nut, bolt, nut_space, cnut_space)
-            colflangeconn = cleatColFlangeBeamWeb(supporting, supported, angle, nut_bolt_array, gap)
-
-        else:
-            # pass
-            snut_space = A.supporting_section.flange_thickness + A.seated.thickness + nut_T
-            sbnut_space = A.supported_section.flange_thickness + A.seated.thickness + nut_T
-            tnut_space = A.supported_section.flange_thickness + A.top_angle.thickness + nut_T
-            tbnut_space = A.supporting_section.flange_thickness + A.top_angle.thickness + nut_T
-
-            nutBoltArray = seatNutBoltArray(A.bolt, nut, bolt, snut_space, sbnut_space, tnut_space, tbnut_space, True)
-            colflangeconn = seatColFlangeBeamWeb(supporting, supported, seatangle, topclipangle, nutBoltArray, gap)
-            #
-
-        # else:
-        #     snut_space = column_T + seat_thick + nut_T
-        #     sbnut_space = beam_T + seat_thick + nut_T
-        #     tnut_space = beam_T + topangle_thick + nut_T
-        #     tbnut_space = column_T + topangle_thick + nut_T
-        #
-        #     nutBoltArray = seatNutBoltArray(self.resultObj, nut, bolt, snut_space, sbnut_space, tnut_space, tbnut_space)
-        #     colflangeconn = seatColFlangeBeamWeb(column, beam, seatangle, topclipangle, nutBoltArray,gap)
-
-        colflangeconn.create_3dmodel()
-        return colflangeconn
-
-    def createBBCoverPlateCAD(self):
-        '''
-        :return: The calculated values/parameters to create 3D CAD model of individual components.
-        '''
-        
-        B = self.module_class
-        if self.connection == KEY_DISP_BEAMCOVERPLATE:
-            # B = BeamCoverPlate()
-            # beam_data = self.fetchBeamPara()  # Fetches the beam dimensions
-
-            beam_tw = float(B.section.web_thickness)
-            beam_T = float(B.section.flange_thickness)
-            beam_d = float(B.section.depth)
-            beam_B = float(B.section.flange_width)
-            beam_R1 = float(B.section.root_radius)
-            beam_R2 = float(B.section.toe_radius)
-            beam_alpha = float(B.section.flange_slope)
-            beam_length = B.flange_plate.length/2+300
-
-            beam_Left = ISection(B=beam_B, T=beam_T, D=beam_d, t=beam_tw,
-                                 R1=beam_R1, R2=beam_R2, alpha=beam_alpha,
-                                 length=beam_length, notchObj=None)  # Call to ISection in Component repository
-            beam_Right = copy.copy(beam_Left)  # Since both the beams are same
-
-
-            plateAbvFlange = Plate(L=B.flange_plate.height,
-                                   W=B.flange_plate.length,
-                                   T=float(B.flange_plate.thickness_provided))  # Call to Plate in Component repository
-            plateBelwFlange = copy.copy(plateAbvFlange)  # Since both the flange plates are identical
-
-            innerplateAbvFlangeFront = Plate(L=B.flange_plate.Innerheight,
-                                             W=B.flange_plate.Innerlength,
-                                             T=float(B.flange_plate.thickness_provided))
-            innerplateAbvFlangeBack = copy.copy(innerplateAbvFlangeFront)
-            innerplateBelwFlangeFront = copy.copy(innerplateAbvFlangeBack)
-            innerplateBelwFlangeBack = copy.copy(innerplateBelwFlangeFront)
-
-            WebPlateLeft = Plate(L=B.web_plate.height,
-                                 W=B.web_plate.length,
-                                 T=float(B.web_plate.thickness_provided))  # Call to Plate in Component repository
-            WebPlateRight = copy.copy(WebPlateLeft)  # Since both the Web plates are identical
-
-            bolt_d = float(B.flange_bolt.bolt_diameter_provided)  # Bolt diameter (shank part), entered by user
-            bolt_r = bolt_d / 2  # Bolt radius (Shank part)
-            bolt_T = self.boltHeadThick_Calculation(bolt_d)  # Bolt head thickness
-            bolt_R = self.boltHeadDia_Calculation(bolt_d) / 2  # Bolt head diameter (Hexagon)
-            bolt_Ht = self.boltLength_Calculation(bolt_d)  # Bolt head height
-
-            bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)  # Call to create Bolt from Component directory
-            nut_T = self.nutThick_Calculation(bolt_d)  # Nut thickness, usually nut thickness = nut height
-            nut_Ht = nut_T
-            nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)  # Call to create Nut from Component directory
-
-            numOfBoltsF = int(B.flange_plate.bolts_required)  # Number of flange bolts for both beams
-            if B.preference == "Outside":
-                nutSpaceF = float(
-                    B.flange_plate.thickness_provided) + beam_T  # Space between bolt head and nut for flange bolts
-            else:
-                nutSpaceF = 2 * float(B.flange_plate.thickness_provided) + beam_T
-
-                # TODO : update nutSpace from Osdag test
-
-            numOfBoltsW = int(B.web_plate.bolts_required)  # Number of web bolts for both beams
-            nutSpaceW = 2 * float(
-                B.web_plate.thickness_provided) + beam_tw  # Space between bolt head and nut for web bolts
-
-            # Bolt placement for Above Flange bolts, call to nutBoltPlacement_AF.py
-            bolting_AF = NutBoltArray_AF(B, nut, bolt, numOfBoltsF, nutSpaceF)
-
-            # Bolt placement for Below Flange bolts, call to nutBoltPlacement_BF.py
-            bolting_BF = NutBoltArray_BF(B, nut, bolt, numOfBoltsF, nutSpaceF)
-
-            # Bolt placement for Web Plate bolts, call to nutBoltPlacement_Web.py
-            bolting_Web = NutBoltArray_Web(B, nut, bolt, numOfBoltsW, nutSpaceW)
-
-            # bbCoverPlate is an object which is passed BBCoverPlateBoltedCAD.py file, which initialized the parameters of each CAD component
-            bbCoverPlate = BBCoverPlateBoltedCAD(beam_Left, beam_Right, plateAbvFlange, plateBelwFlange,
-                                                 innerplateAbvFlangeFront,
-                                                 innerplateAbvFlangeBack, innerplateBelwFlangeFront,
-                                                 innerplateBelwFlangeBack,
-                                                 WebPlateLeft, WebPlateRight, bolting_AF, bolting_BF, bolting_Web,
-                                                 B)
-
-            # bbCoverPlate.create_3DModel() will create the CAD model of each component, debugging this line will give moe clarity
-            bbCoverPlate.create_3DModel()
-
-        elif self.connection == KEY_DISP_BEAMCOVERPLATEWELD:
-            # B = self.module_class()
-            beamLenght = (max(float(B.flange_plate.length), float(B.web_plate.length)) + 600) / 2
-            beam = ISection(B=float(B.section.flange_width), T=float(B.section.flange_thickness),
-                            D=float(B.section.depth), t=float(B.section.web_thickness), R1=float(B.section.root_radius),
-                            R2=float(B.section.toe_radius), alpha=float(B.section.flange_slope), length=beamLenght,
-                            notchObj=None)
-            flangePlate = Plate(L=float(B.flange_plate.length), W=float(B.flange_plate.height),
-                                T=float(B.flange_plate.thickness_provided))
-            innerFlangePlate = Plate(L=float(B.flange_plate.Innerlength), W=float(B.flange_plate.Innerheight),
-                                     T=float(B.flange_plate.thickness_provided))
-            webPlate = Plate(L=float(B.web_plate.length), W=float(B.web_plate.height),
-                             T=float(B.web_plate.thickness_provided))
-
-            flangePlateWeldL = FilletWeld(h=float(B.flange_weld.size), b=float(B.flange_weld.size), L=flangePlate.L)
-            flangePlateWeldW = FilletWeld(h=float(B.flange_weld.size), b=float(B.flange_weld.size), L=flangePlate.W)
-
-            innerflangePlateWeldL = FilletWeld(h=float(B.flange_weld.size), b=float(B.flange_weld.size),
-                                               L=innerFlangePlate.L)
-            innerflangePlateWeldW = FilletWeld(h=float(B.flange_weld.size), b=float(B.flange_weld.size),
-                                               L=innerFlangePlate.W)
-
-            webPlateWeldL = FilletWeld(h=float(B.web_weld.size), b=float(B.web_weld.size), L=webPlate.L)
-            webPlateWeldW = FilletWeld(h=float(B.web_weld.size), b=float(B.web_weld.size), L=webPlate.W)
-
-            bbCoverPlate = BBSpliceCoverPlateWeldedCAD(B, beam, flangePlate, innerFlangePlate, webPlate,
-                                                       flangePlateWeldL, flangePlateWeldW,
-                                                       innerflangePlateWeldL,
-                                                       innerflangePlateWeldW, webPlateWeldL, webPlateWeldW)
-
-            # bbCoverPlate.create_3DModel() will create the CAD model of each component, debugging this line will give moe clarity
-            bbCoverPlate.create_3DModel()
-
-        return bbCoverPlate
-
-    def createBBEndPlateCAD(self):
-        """
-        Calls the CAD components like beam, plate, stiffeners, fillet and grove weld, nut and bolt. Also calls CAD file
-        :return: creates CAD model
-        """
-
-        BBE = self.module_class
-
-        beam_tw = float(BBE.beam_tw)
-        beam_T = float(BBE.beam_tf)
-        beam_d = float(BBE.beam_D)
-        beam_B = float(BBE.beam_bf)
-        beam_R1 = 0.0
-        beam_R2 = 0.0
-        beam_alpha = 0.0
-        beam_length = 500
-
-
-
-        beam_Left = ISection(B=beam_B, T=beam_T, D=beam_d, t=beam_tw,
-                             R1=beam_R1, R2=beam_R2, alpha=beam_alpha,
-                             length=beam_length, notchObj=None)
-        beam_Right = copy.copy(beam_Left)  # Since both the beams are same
-
-
-        plate_Left = Plate(W=BBE.ep_width_provided,
-                           L=BBE.ep_height_provided,
-                           T=BBE.plate_thickness)
-        plate_Right = copy.copy(plate_Left)  # Since both the end plates are identical
-
-        # Beam stiffeners 4 if extended both ways, only 1 and 3 if extended oneway and non for flus type
-        beam_stiffeners = StiffenerPlate(W=BBE.stiffener_height, L=BBE.stiffener_length,
-                                         T=BBE.stiffener_thickness,
-                                         R11=BBE.stiffener_length - 25,
-                                         R12=BBE.stiffener_height - 25,
-                                         L21=5.0, L22=5.0)  # TODO: given hard inputs to L21 and L22
-        #
-        # # Beam stiffeners for the flush type endplate
-        beam_stiffenerFlush = StiffenerPlate(W=BBE.stiffener_height, L=BBE.stiffener_length,
-                                         T=BBE.stiffener_thickness,
-                                         L21=5.0, L22=5.0)
-
-
-        # alist = self.designParameters()  # An object to save all input values entered by user
-
-        bolt_d = float(BBE.bolt_diameter_provided)  # Bolt diameter, entered by user
-        bolt_r = bolt_d / 2
-        print(bolt_d)
-        bolt_T = self.boltHeadThick_Calculation(bolt_d)
-        bolt_R = self.boltHeadDia_Calculation(bolt_d) / 2
-        bolt_Ht = self.boltLength_Calculation(bolt_d)
-
-        bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)  # Call to create Bolt from Component repo
-        nut_T = self.nutThick_Calculation(bolt_d)
-        nut_Ht = nut_T
-        nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)
-
-        numberOfBolts = int(BBE.bolt_numbers)
-
-        nutSpace = 2 * float(BBE.plate_thickness) + nut_T  # Space between bolt head and nut
-
-        bbNutBoltArray = BBENutBoltArray(BBE, nut, bolt, numberOfBolts, nutSpace)
-
-        # Following welds are for to weld stiffeners for extended bothways and ext4ended oneway
-        # bbWeld for stiffener hight on left side
-        bbWeldStiffHeight = FilletWeld(b=BBE.weld_size_stiffener, h=BBE.weld_size_stiffener,
-
-                                       L=BBE.stiffener_height - 5.0)  # outputobj['Stiffener']['Length'] - 25
-
-        # bbWeld for stiffener length on left side
-        bbWeldStiffLength = FilletWeld(b=BBE.weld_size_stiffener, h=BBE.weld_size_stiffener,
-                                       L=BBE.stiffener_length-5.0)
-        #
-        # # following welds are fillet welds for the flush endplate stiffeners
-        bbWeldFlushstiffHeight = FilletWeld(b=BBE.weld_size_stiffener, h=BBE.weld_size_stiffener,
-                                       L=BBE.stiffener_height-5.0)
-
-        bbWeldFlushstiffLength = FilletWeld(b=BBE.weld_size_stiffener, h=BBE.weld_size_stiffener,
-                                       L=BBE.stiffener_length-5.0)
-        #
-        # # if BBE.weld.type == "Fillet Weld":
-        # #
-            # Fillet Weld for connecting end plate to beam
-
-        # # Followings welds are welds above beam flange, Qty = 4
-        # bbWeldAbvFlang = FilletWeld(b=float(BBE.flange_weld.size), h=float(BBE.flange_weld.size),
-        #                             L=beam_B)
-        #
-        # # Followings welds are welds below beam flange, Qty = 8
-        # bbWeldBelwFlang = FilletWeld(b=float(BBE.flange_weld.size), h=float(BBE.flange_weld.size),
-        #                              L=(beam_B - beam_tw) / 2 -
-        #                                beam_R1 - beam_R2)
-        #
-        # # Followings welds are welds placed aside of beam web, Qty = 4
-        # bbWeldSideWeb = FilletWeld(b=float(BBE.web_weld.size), h=float(BBE.web_weld.size),
-        #                            L=beam_d - 2 * (beam_T + beam_R1) - (2 * 5))
-        # # #
-        # #     extbothWays = BBEndplateCAD(beam_Left, beam_Right, plate_Left, plate_Right, bbNutBoltArray,
-        # #                             bbWeldAbvFlang, bbWeldBelwFlang, bbWeldSideWeb, bbWeldFlushstiffHeight,
-        # #                             bbWeldFlushstiffLength,
-        # #                             bbWeldStiffHeight, bbWeldStiffLength, beam_stiffeners, beam_stiffenerFlush, alist,
-        # #                             outputobj)
-        # #     extbothWays.create_3DModel()
-        # #
-        # #     return extbothWays
-        # #
-        # # else:  # Groove Weld
-        #
-        # # Grove Weld for connecting end plate to beam
-        bbWeldFlang = GrooveWeld(b=float(beam_tw), h=float(beam_T),
-                                 L=beam_B)  # outputobj["Weld"]["Size"]
-        #
-        # # Followings welds are welds placed aside of beam web, Qty = 4           # edited length value by Anand Swaroop
-        # bbWeldSideWeb = FilletWeld(b=float(BBE.web_weld.size), h=float(BBE.web_weld.size),
-        #                                                       L=beam_d - 2 * (beam_T + beam_R1) - (2 * 5))
-        bbWeldWeb = GrooveWeld(b=float(beam_tw), h=float(beam_tw),
-                               L=beam_d - 2 * beam_T)  # outputobj["Weld"]["Size"]
-
-
-
-        extbothWays = CADGroove(BBE,beam_Left, beam_Right, plate_Left, plate_Right, bbNutBoltArray,bbWeldFlang,
-                                    bbWeldWeb,beam_stiffeners,beam_stiffenerFlush,bbWeldStiffHeight,bbWeldStiffLength,bbWeldFlushstiffHeight,bbWeldFlushstiffLength)
-        extbothWays.create_3DModel()
-
-        return extbothWays
-
-    def createBCEndPlateCAD(self):
-        """
-        Calls the CAD components like beam, plate, stiffeners, fillet and grove weld, nut and bolt. Also calls CAD file
-        :return: creates CAD model
-        """
-        BCE = self.module_class
-
-        column_tw = float(BCE.column_tw)
-        column_T = float(BCE.column_tf)
-        column_d = float(BCE.column_D)
-        column_B = float(BCE.column_bf)
-        column_R1 = float(BCE.column_r1)
-        column_R2 = float(BCE.column_r2)
-        column_alpha = 0.0
-        self.column_length = float(BCE.ep_height_provided + 1000)
-        # print(column_T,column_B,column_d,column_tw,column_R1,column_R2)
-
-        beam_tw = float(BCE.beam_tw)
-        beam_T = float(BCE.beam_tf)
-        beam_d = float(BCE.beam_D)
-        beam_B = float(BCE.beam_bf)
-        beam_R1 = float(BCE.beam_r1)
-        beam_R2 = float(BCE.beam_r2)
-        beam_alpha = 0.0
-        self.beam_length = BCE.stiffener_length +500
-
-        beam_Left = ISection(B=column_B, T=column_T, D=column_d, t=column_tw,
-                             R1=column_R1, R2=column_R2, alpha=column_alpha,
-                             length=self.column_length, notchObj=None)
-
-        beam_Right = ISection(B=beam_B, T=beam_T, D=beam_d, t=beam_tw,
-                              R1=beam_R1, R2=beam_R2, alpha=beam_alpha,
-                              length=self.beam_length, notchObj=None)  # Since both the beams are same
-
-        # outputobj = self.outputs  # Save all the claculated/displayed out in outputobj
-
-        plate_Right = Plate(W=BCE.ep_width_provided,
-                            L=BCE.ep_height_provided,
-                            T=BCE.plate_thickness)
-
-
-
-        # TODO adding enpplate type and check if code is working
-        # TODO added connectivity type here
-
-
-
-        if  BCE.connectivity == "Column Web-Beam Web":
-            conn_type = 'col_web_connectivity'
-        else:  # "Column flange-Beam web"
-            conn_type = 'col_flange_connectivity'
-
-        print(conn_type,"hfhfh")
-
-        # endplate_type = alist['Member']['EndPlate_type']
-        if BCE.endplate_type == 'Extended One Way - Irreversible Moment':
-            endplate_type = "one_way"
-        elif BCE.endplate_type == 'Flushed - Reversible Moment':
-            endplate_type = "flush"
-        else:  # uiObj['Member']['EndPlate_type'] == "Extended both ways":
-            endplate_type = "both_way"
-
-        if BCE.continuity_plate_tension_flange_status == True or BCE.continuity_plate_tension_flange_status == True:
-
-            if BCE.connectivity != "Column Web-Beam Web":
-                contPlates = StiffenerPlate(W=(float(column_B) - float(column_tw)) / 2,
-                                            L=float(column_d) - 2 * float(column_T),
-                                            T=BCE.cont_plate_thk_provided, L21=BCE.notch_size, R22=BCE.notch_size,
-                                            R21=BCE.notch_size, L22=BCE.notch_size)
-
-                contWeldD = FilletWeld(b=BCE.weld_size_continuity_plate, h=BCE.weld_size_continuity_plate,
-                                       L=float(column_d) - 2 * float(column_T)-2*BCE.notch_size)
-                contWeldB = FilletWeld(b=BCE.weld_size_continuity_plate, h=BCE.weld_size_continuity_plate,
-                                       L=float(column_B) / 2 - float(column_tw) / 2-BCE.notch_size)
-            else:
-                contPlates = StiffenerPlate(W=(float(column_B) - float(column_tw)) / 2,
-                                            L=float(column_d) - 2 * float(column_T),
-                                            T=BCE.cont_plate_thk_provided, L11=BCE.notch_size, R11=BCE.notch_size,
-                                            R12=BCE.notch_size, L12=BCE.notch_size)
-                contWeldD = FilletWeld(b=BCE.weld_size_continuity_plate, h=BCE.weld_size_continuity_plate,
-                                       L=float(column_d) - 2 * float(column_T)-2*BCE.notch_size)
-                contWeldB = FilletWeld(b=BCE.weld_size_continuity_plate, h=BCE.weld_size_continuity_plate,
-                                       L=float(column_B) / 2 - float(column_tw) / 2-BCE.notch_size)
-        else:
-            contPlates = None
-            contWeldD = None
-            contWeldB = None
-
-        if BCE.web_stiffener_status == True:
-
-
-            webplate = StiffenerPlate(W=BCE.web_stiffener_width,
-                                       L=BCE.web_stiffener_depth,
-                                       T=BCE.web_stiffener_thk_provided)
-            webWeldD = FilletWeld(b=BCE.weld_size_web_stiffener, h=BCE.weld_size_web_stiffener,
-                                   L=BCE.web_stiffener_depth)
-            webWeldB = FilletWeld(b=BCE.weld_size_web_stiffener, h=BCE.weld_size_web_stiffener,
-                                   L=BCE.web_stiffener_width)
-        else:
-            webplate = None
-            webWeldD = None
-            webWeldB = None
-
-
-
-
-        # if BCE.web_stiffener_status == True:
-        #     diagplate = StiffenerPlate(W=(float(column_B) - float(column_tw)) / 2,
-        #                                 L=BCE.diag_stiffener_length,
-        #                                 T=BCE.diag_stiffener_thk_provided)
-        #     diagWeldD = FilletWeld(b=BCE.weld_size_diag_stiffener, h=BCE.weld_size_diag_stiffener,
-        #                            L=BCE.diag_stiffener_length)
-        #     diagWeldB = FilletWeld(b=BCE.diag_stiffener_thk_provided, h=BCE.diag_stiffener_thk_provided,
-        #                            L=float(column_B) / 2 - float(column_tw) / 2)
-        # else:
-        ########## diagplate is omitted due to detailing issues ###########
-        diagplate = None
-        diagWeldD = None
-        diagWeldB = None
-        ########## diagplate is omitted due to detailing issues ###########
-
-        # contPlate_L2 = StiffenerPlate(W=(float(column_data["B"]) - float(column_data["tw"])) / 2,
-        # 							  L=float(column_data["D"]) - 2 * float(column_data["T"]),
-        # 							  T=outputobj['ContPlateTens']['Thickness'])
-        # contPlate_R1 = copy.copy(contPlate_L1)
-        # contPlate_R2 = copy.copy(contPlate_L2)
-
-
-
-        beam_stiffeners = StiffenerPlate(W=BCE.stiffener_height, L=BCE.stiffener_length,
-                                         T=BCE.stiffener_thickness,
-                                         R11=BCE.stiffener_length- 25,
-                                         R12=BCE.stiffener_height - 25,
-                                         L21=5.0, L22=5.0)  # TODO: given hard inputs to L21 and L22
-
-        beam_stiffenerFlush = StiffenerPlate(W=BCE.stiffener_height, L=BCE.stiffener_length,
-                                             T=BCE.stiffener_thickness,
-                                             L21=5.0, L22=5.0)
-
-        bcWeldFlushstiffHeight = FilletWeld(b=BCE.weld_size_stiffener, h=BCE.weld_size_stiffener,
-                                            L=BCE.stiffener_height - 5.0)
-
-        bcWeldFlushstiffLength = FilletWeld(b=BCE.weld_size_stiffener, h=BCE.weld_size_stiffener,
-                                            L=BCE.stiffener_length - 5.0)
-
-        # beam_stiffener_2 = copy.copy(beam_stiffener_1)
-
-        bolt_d = float(BCE.bolt.bolt_diameter_provided)  # Bolt diameter, entered by user
-        bolt_r = bolt_d / 2
-        bolt_T = self.boltHeadThick_Calculation(bolt_d)
-        bolt_R = self.boltHeadDia_Calculation(bolt_d) / 2
-        bolt_Ht = self.boltLength_Calculation(bolt_d)
-
-        bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)  # Call to create Bolt from Component repo
-        nut_T = self.nutThick_Calculation(bolt_d)
-        nut_Ht = nut_T
-        nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)
-
-        numberOfBolts = int(BCE.bolt_numbers)
-
-
-        # TODO remove all the clutter later
-
-        # nutSpace = 2 * float(outputobj["Plate"]["Thickness"]) + nut_T   # Space between bolt head and nut
-        if conn_type == 'col_flange_connectivity':
-            nutSpace = float(column_T) + float(BCE.plate_thickness) + nut_T # / 2 + bolt_T / 2  # Space between bolt head and nut
-
-        else:
-            nutSpace = float(column_tw) + float(BCE.plate_thickness) + nut_T  # / 2 + bolt_T / 2  # Space between bolt head and nut
-            print(nutSpace,column_tw,BCE.plate_thickness,nut_T,"121")
-        bbNutBoltArray = BCE_NutBoltArray(BCE, nut, bolt, numberOfBolts, nutSpace, endplate_type)
-
-        ###########################
-        #       WELD SECTIONS     #
-        ###########################
-        '''
-        Following sections are for creating Fillet Welds and Groove Welds
-        Welds are numbered from Top to Bottom in Z-axis, Front to Back in Y axis and Left to Right in X axis. 
-        '''
-        ############################### Weld for the beam stiffeners ################################################
-
-        # bcWeld for stiffener hight on left side
-        print(BCE.notch_size,BCE.stiffener_thickness,BCE.stiffener_height,BCE.stiffener_length, BCE.cont_plate_thk_provided,BCE.weld_size_continuity_plate,BCE.weld_size_continuity_plate,"jjjj")
-        bcWeldStiffHeight = FilletWeld(b=BCE.weld_size_stiffener, h=BCE.weld_size_stiffener,
-                                       L=BCE.stiffener_height-5.0)
-
-        #
-        bcWeldStiffLength = FilletWeld(b=BCE.weld_size_stiffener, h=BCE.weld_size_stiffener,
-                                       L=BCE.stiffener_length-5.0)
-
-
-
-        bcWeldFlang = GrooveWeld(b=float(beam_tw), h=float(beam_T),
-                                 L=beam_B)
-        # #     # bcWeldFlang_2 = copy.copy(bcWeldFlang_1)
-        # #
-        # #     # Followings welds are welds placed aside of beam web, Qty = 4 			# edited length value by Anand Swaroop
-        bcWeldWeb = GrooveWeld(b=float(beam_tw), h=float(beam_tw),
-                               L=beam_d - 2 * beam_T)
-
-        if conn_type == 'col_flange_connectivity':
-        #
-        #     if alist["Weld"]["Method"] == "Fillet Weld":
-        #
-        #         # # Followings welds are welds above beam flange, Qty = 4
-        #         # bcWeldAbvFlang = FilletWeld(b=float(alist["Weld"]["Flange (mm)"]),
-        #         # 							   h=float(alist["Weld"]["Flange (mm)"]),
-        #         # 							   L=beam_B)
-        #         # # bcWeldAbvFlang_22 = copy.copy(bcWeldAbvFlang_21)
-        #         #
-        #         # # Followings welds are welds below beam flange, Qty = 8
-        #         # bcWeldBelwFlang = FilletWeld(b=float(alist["Weld"]["Flange (mm)"]),
-        #         # 								h=float(alist["Weld"]["Flange (mm)"]), L=(beam_B - beam_tw) / 2)
-        #         # # bcWeldBelwFlang_22 = copy.copy(bcWeldBelwFlang_21)
-        #         # # bcWeldBelwFlang_23 = copy.copy(bcWeldBelwFlang_21)
-        #         # # bcWeldBelwFlang_24 = copy.copy(bcWeldBelwFlang_21)
-        #         #
-        #         # # Followings welds are welds placed aside of beam web, Qty = 4 			# edited length value by Anand Swaroop
-        #         # bcWeldSideWeb = FilletWeld(b=float(alist["Weld"]["Web (mm)"]), h=float(alist["Weld"]["Web (mm)"]),
-        #         # 							  L=beam_d - 2 * beam_T - 40)
-        #         # # bcWeldSideWeb_22 = copy.copy(bcWeldSideWeb_21)
-        #
-        #         extbothWays = CADFillet(beam_Left, beam_Right, plate_Right, bbNutBoltArray, bolt, bcWeldAbvFlang,
-        #                                 bcWeldBelwFlang,
-        #                                 bcWeldSideWeb, contWeldD, contWeldB,
-        #                                 bcWeldStiffHeight, bcWeldStiffLength,
-        #                                 contPlates, beam_stiffeners, endplate_type, conn_type,
-        #                                 outputobj)
-        #         extbothWays.create_3DModel()
-        #
-        #         return extbothWays
-        #
-        #     else:  # Groove Weld
-
-            # extbothWays = CADGroove(beam_Left, beam_Right, plate_Right, bbNutBoltArray, bolt,
-            #                         bcWeldFlang, bcWeldWeb,
-            #                         bcWeldStiffHeight, bcWeldStiffLength, contWeldD, contWeldB,
-            #                         contPlates, beam_stiffeners, endplate_type, outputobj)
-            extbothWays = BCECADGroove(BCE,beam_Left, beam_Right, plate_Right, bbNutBoltArray, bolt,bcWeldFlang,
-                                    bcWeldWeb, contPlates,beam_stiffeners,bcWeldStiffHeight,bcWeldStiffLength,contWeldD,contWeldB,diagplate, diagWeldD, diagWeldB, webplate, webWeldB, webWeldD, beam_stiffenerFlush,bcWeldFlushstiffHeight, bcWeldFlushstiffLength,endplate_type)
-
-
-            extbothWays.create_3DModel()
-
-            return extbothWays
-
-        else:  # conn_type = 'col_web_connectivity'
-            bcWeldFlang = GrooveWeld(b=float(beam_tw), h=float(beam_T),
-                                     L=beam_B)
-            # #     # bcWeldFlang_2 = copy.copy(bcWeldFlang_1)
-            # #
-            # #     # Followings welds are welds placed aside of beam web, Qty = 4 			# edited length value by Anand Swaroop
-            bcWeldWeb = GrooveWeld(b=float(beam_tw), h=float(beam_tw),
-                                   L=beam_d - 2 * beam_T)
-
-            ########## diagplate is omitted due to detailing issues ###########
-            diagplate = None
-            diagWeldD = None
-            diagWeldB = None
-            ########## diagplate is omitted due to detailing issues ###########
-
-            webplate = None
-            webWeldD = None
-            webWeldB = None
-            # if alist["Weld"]["Method"] == "Fillet Weld":
-            #     # # Followings welds are welds above beam flange, Qty = 4
-            #     # bcWeldAbvFlang_21 = FilletWeld(b=float(alist["Weld"]["Flange (mm)"]),
-            #     # 							   h=float(alist["Weld"]["Flange (mm)"]),
-            #     # 							   L=beam_B)
-            #     # bcWeldAbvFlang_22 = copy.copy(bcWeldAbvFlang_21)
-            #     #
-            #     # # Followings welds are welds below beam flange, Qty = 8
-            #     # bcWeldBelwFlang_21 = FilletWeld(b=float(alist["Weld"]["Flange (mm)"]),
-            #     # 								h=float(alist["Weld"]["Flange (mm)"]), L=(beam_B - beam_tw) / 2)
-            #     # bcWeldBelwFlang_22 = copy.copy(bcWeldBelwFlang_21)
-            #     # bcWeldBelwFlang_23 = copy.copy(bcWeldBelwFlang_21)
-            #     # bcWeldBelwFlang_24 = copy.copy(bcWeldBelwFlang_21)
-            #     #
-            #     # # Followings welds are welds placed aside of beam web, Qty = 4 			# edited length value by Anand Swaroop
-            #     # bcWeldSideWeb_21 = FilletWeld(b=float(alist["Weld"]["Web (mm)"]), h=float(alist["Weld"]["Web (mm)"]),
-            #     # 							  L=beam_d - 2 * beam_T - 40)
-            #     # bcWeldSideWeb_22 = copy.copy(bcWeldSideWeb_21)
-
-            #     col_web_connectivity = CADColWebFillet(beam_Left, beam_Right, plate_Right, bbNutBoltArray, bolt,
-            #                                            bcWeldAbvFlang,
-            #                                            bcWeldBelwFlang,
-            #                                            bcWeldSideWeb,
-            #                                            contWeldD, contWeldB,
-            #                                            bcWeldStiffHeight, bcWeldStiffLength,
-            #                                            contPlates, beam_stiffeners, endplate_type,
-            #                                            conn_type, outputobj)
-            #
-            #     col_web_connectivity.create_3DModel()
-            #
-            #     return col_web_connectivity
-            #
-            # else:  # Groove Weld
-
-                # else:
-
-                #######################################
-                #       WELD SECTIONS QUARTER CONE    #
-                #######################################
-
-            # col_web_connectivity = CADcolwebGroove(beam_Left, beam_Right, plate_Right, bbNutBoltArray, bolt,
-            #                                        bcWeldFlang, bcWeldWeb,
-            #                                        bcWeldStiffHeight, bcWeldStiffLength,
-            #                                        contWeldD, contWeldB,
-            #                                        contPlates, beam_stiffeners, endplate_type,
-            #                                        outputobj)
-
-            col_web_connectivity = CADcolwebGroove(BCE, beam_Left, beam_Right, plate_Right, bbNutBoltArray, bolt,
-                                                   bcWeldFlang,bcWeldWeb,contPlates,beam_stiffeners,bcWeldStiffHeight,bcWeldStiffLength,contWeldD,contWeldB,  diagplate, diagWeldD, diagWeldB, webplate, webWeldB, webWeldD, beam_stiffenerFlush,bcWeldFlushstiffHeight, bcWeldFlushstiffLength,endplate_type)
-
-
-            col_web_connectivity.create_3DModel()
-
-            return col_web_connectivity
-
-
-
-    def createCCCoverPlateCAD(self):
-
-        if self.connection == KEY_DISP_COLUMNCOVERPLATE:
-            C = self.module_class
-            columnLenght = (max(float(C.flange_plate.length), float(C.web_plate.length)) + 600) / 2
-            # column = ISection(B=206.4, T=17.3, D=215.8, t=10, R1=15, R2=75, alpha=94, length=1000, notchObj=None)
-            # flangePlate = Plate(L=240, W=203.6, T=10)
-            # innerFlangePlate = Plate(L=240, W=85, T=10)
-            # webPlate = Plate(L=600, W=120, T=8)
-            # gap = 10
-            column = ISection(B=float(C.section.flange_width), T=float(C.section.flange_thickness),
-                              D=float(C.section.depth), t=float(C.section.web_thickness),
-                              R1=float(C.section.root_radius),
-                              R2=float(C.section.toe_radius), alpha=float(C.section.flange_slope), length=columnLenght,
-                              notchObj=None)
-            flangePlate = Plate(L=float(C.flange_plate.length), W=float(C.flange_plate.height),
-                                T=float(C.flange_plate.thickness_provided))
-            innerFlangePlate = Plate(L=float(C.flange_plate.Innerlength), W=float(C.flange_plate.Innerheight),
-                                     T=float(C.flange_plate.thickness_provided))
-            webPlate = Plate(L=float(C.web_plate.length), W=float(C.web_plate.height),
-                             T=float(C.web_plate.thickness_provided))
-
-            bolt_d = float(C.bolt.bolt_diameter_provided)  # Bolt diameter (shank part), entered by user
-            bolt_r = bolt_d / 2  # Bolt radius (Shank part)
-            bolt_T = self.boltHeadThick_Calculation(bolt_d)  # Bolt head thickness
-            bolt_R = self.boltHeadDia_Calculation(bolt_d) / 2  # Bolt head diameter (Hexagon)
-            bolt_Ht = self.boltLength_Calculation(bolt_d)  # Bolt head height
-
-            bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)  # Call to create Bolt from Component directory
-            nut_T = self.nutThick_Calculation(bolt_d)  # Nut thickness, usually nut thickness = nut height
-            nut_Ht = nut_T
-            nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)
-            if C.preference != 'Outside':
-                nut_space = 2 * flangePlate.T + column.T
-                nut_spaceW = 2 * webPlate.T + column.t
-            else:
-                nut_space = flangePlate.T + column.T
-                nut_spaceW = 2*webPlate.T + column.t
-
-            numOfboltsF = C.flange_plate.bolts_required
-            numOfboltsW = C.web_plate.bolts_required
-
-            nut_bolt_array_AF = CCSpliceNutBolt_AF(C, nut, bolt, numOfboltsF, nut_space)
-            nut_bolt_array_BF = CCSpliceNutBolt_BF(C, nut, bolt, numOfboltsF, nut_space)
-            nut_bolt_array_Web = CCSpliceNutBolt_Web(C, nut, bolt, numOfboltsW, nut_spaceW)
-
-            ccCoverPlateCAD = CCSpliceCoverPlateBoltedCAD(C, column, flangePlate, innerFlangePlate, webPlate,
-                                                                nut_bolt_array_AF, nut_bolt_array_BF,
-                                                                nut_bolt_array_Web)
-
-            ccCoverPlateCAD.create_3DModel()
-
-
-        elif self.connection == KEY_DISP_COLUMNCOVERPLATEWELD:
-
-            C = self.module_class
-            columnLenght = (max(float(C.flange_plate.length), float(C.web_plate.length)) + 600) / 2
-            column = ISection(B=float(C.section.flange_width), T=float(C.section.flange_thickness),
-                              D=float(C.section.depth), t=float(C.section.web_thickness),
-                              R1=float(C.section.root_radius),
-                              R2=float(C.section.toe_radius), alpha=float(C.section.flange_slope), length=columnLenght,
-                              notchObj=None)
-            flangePlate = Plate(L=float(C.flange_plate.length), W=float(C.flange_plate.height),
-                                T=float(C.flange_plate.thickness_provided))
-            innerFlangePlate = Plate(L=float(C.flange_plate.Innerlength), W=float(C.flange_plate.Innerheight),
-                                     T=float(C.flange_plate.thickness_provided))
-            webPlate = Plate(L=float(C.web_plate.length), W=float(C.web_plate.height),
-                             T=float(C.web_plate.thickness_provided))
-
-            flangePlateWeldL = FilletWeld(h=float(C.flange_weld.size), b=float(C.flange_weld.size), L=flangePlate.L)
-            flangePlateWeldW = FilletWeld(h=float(C.flange_weld.size), b=float(C.flange_weld.size), L=flangePlate.W)
-
-            innerflangePlateWeldL = FilletWeld(h=float(C.flange_weld.size), b=float(C.flange_weld.size),
-                                               L=innerFlangePlate.L)
-            innerflangePlateWeldW = FilletWeld(h=float(C.flange_weld.size), b=float(C.flange_weld.size),
-                                               L=innerFlangePlate.W)
-
-            webPlateWeldL = FilletWeld(h=float(C.web_weld.size), b=float(C.web_weld.size), L=webPlate.L)
-            webPlateWeldW = FilletWeld(h=float(C.web_weld.size), b=float(C.web_weld.size), L=webPlate.W)
-
-            ccCoverPlateCAD = CCSpliceCoverPlateWeldedCAD(C, column, flangePlate, innerFlangePlate, webPlate,
-                                                          flangePlateWeldL, flangePlateWeldW,
-                                                          innerflangePlateWeldL,
-                                                          innerflangePlateWeldW, webPlateWeldL, webPlateWeldW)
-
-            ccCoverPlateCAD.create_3DModel()
-
-        return ccCoverPlateCAD
-
-    def createCCEndPlateCAD(self):
-        CEP = self.module_class
-
-        bolt_d = float(CEP.bolt_diam_provided)  # Bolt diameter (shank part), entered by user
-        bolt_r = bolt_d / 2  # Bolt radius (Shank part)
-        bolt_T = self.boltHeadThick_Calculation(bolt_d)  # Bolt head thickness
-        bolt_R = self.boltHeadDia_Calculation(bolt_d) / 2  # Bolt head diameter (Hexagon)
-        bolt_Ht = self.boltLength_Calculation(bolt_d)  # Bolt head height
-
-        bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)  # Call to create Bolt from Component directory
-        nut_T = self.nutThick_Calculation(bolt_d)  # Nut thickness, usually nut thickness = nut height
-        nut_Ht = nut_T
-        nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)
-        if CEP.weld_size <= 16:
-            stiffener = StiffenerPlate(L=CEP.stiff_wt, W=CEP.stiff_ht, T=CEP.t_s, L11=CEP.stiff_wt / 2,
-                                       L12=CEP.stiff_ht / 2, R21=10, R22=10)
-            weld_stiff_h = GrooveWeld(b=stiffener.T, h= stiffener.T, L=stiffener.L - stiffener.R22)
-            weld_stiff_v = FilletWeld(b= CEP.weld_size, h= CEP.weld_size, L=stiffener.W - stiffener.R21)
-        else:
-            stiffener = StiffenerPlate(L=CEP.stiff_wt  - CEP.t_s, W=CEP.stiff_ht, T=CEP.t_s, L11=CEP.stiff_wt / 2,
-                                       L12=CEP.stiff_ht / 2, R21=10, R22=10)
-            weld_stiff_h = GrooveWeld(b=stiffener.T, h= stiffener.T, L=stiffener.L - stiffener.R22)
-            weld_stiff_v = GrooveWeld(b=stiffener.T, h= stiffener.T, L=stiffener.W - stiffener.R21)
-
-        column = ISection(B=float(CEP.section.flange_width), T=float(CEP.section.flange_thickness),
-                          D=float(CEP.section.depth), t=float(CEP.section.web_thickness),
-                          R1=float(CEP.section.root_radius), R2=float(CEP.section.toe_radius),
-                          alpha=float(CEP.section.flange_slope), length=1000, notchObj=None)
-        endPlate = Plate(L=float(CEP.plate_height), W=float(CEP.plate_width), T=float(CEP.plate_thickness_provided))
-        flangeWeld = GrooveWeld(b=column.T, h=float(10.0), L=column.B)
-        webWeld = GrooveWeld(b=column.t, h=flangeWeld.h, L=column.D - 2 * column.T)
-
-        # bolt = Bolt(R=14, T=10, H=13, r=8)
-        # nut = Nut(R=bolt.R, T=bolt.T, H=bolt.T + 1, innerR1=bolt.r)
-        nut_space = 2 * endPlate.T + nut.T  # member.T + plate.T + nut.T
-
-        nut_bolt_array = CEPNutBoltArray(CEP, column, nut, bolt, nut_space)
-
-        ccEndPlateCad = CCEndPlateCAD(CEP, column, endPlate, flangeWeld, webWeld, nut_bolt_array, stiffener, weld_stiff_h, weld_stiff_v)
-
-        ccEndPlateCad.create_3DModel()
-
-        return ccEndPlateCad
-
-    def createBasePlateCAD(self):
-        """
-        :return: The calculated values/parameters to create 3D CAD model of individual components.
-        """
-
-        BP = self.module_class
-
-        if BP.connectivity == 'Hollow/Tubular Column Base':
-            if BP.dp_column_designation[1:4] == 'SHS' or BP.dp_column_designation[1:4] == 'RHS':
-                sec = RectHollow(L=float(BP.column_bf), W=float(BP.column_D), H=1000, T=float(BP.column_tf))
-
-                BP.weld_size_stiffener = max(sec.T, BP.stiffener_plt_thk)/2
-                weld_sec = RectHollow(L=sec.L, W=sec.W, H=float(BP.weld_size_stiffener), T=sec.T)
-                stiff_alg_l = StiffenerPlate(L=BP.stiffener_plt_len_along_D - BP.weld_size_stiffener, W=BP.stiffener_plt_height, T= BP.stiffener_plt_thk,
-                                             L11= BP.stiffener_plt_len_along_D - BP.weld_size_stiffener - 50, L12=BP.stiffener_plt_height - 100, R21=15, R22=15)
-                stiff_alg_b = StiffenerPlate(L= BP.stiffener_plt_len_along_B - BP.weld_size_stiffener, W=BP.stiffener_plt_height, T=BP.stiffener_plt_thk,
-                                             L11= BP.stiffener_plt_len_along_B - BP.weld_size_stiffener - 50, L12=BP.stiffener_plt_height - 100, R21=15, R22=15)
-
-                weld_stiff_l_v = GrooveWeld(b=stiff_alg_l.T, h=BP.weld_size_stiffener, L=stiff_alg_l.W - stiff_alg_l.R22)
-                weld_stiff_l_h = GrooveWeld(b=stiff_alg_l.T, h=BP.weld_size_stiffener, L=stiff_alg_l.L - stiff_alg_l.R22)
-                weld_stiff_b_v = GrooveWeld(b=stiff_alg_b.T, h=BP.weld_size_stiffener, L=stiff_alg_b.W - stiff_alg_b.R22)
-                weld_stiff_b_h = GrooveWeld(b=stiff_alg_b.T, h=BP.weld_size_stiffener, L=stiff_alg_b.L - stiff_alg_b.R22)
-
-
-            else:       #self.BP.dp_column_designation[1:4] == 'CHS':
-                sec = CircularHollow(r=float(BP.column_D)/ 2, T=float(BP.column_tf), H=1500)
-
-                BP.weld_size_stiffener = max(sec.T, BP.stiffener_plt_thk)/2
-
-                weld_sec = CircularHollow(r=sec.r, T=sec.T, H=float(BP.weld_size_stiffener))
-                stiff_alg_l = StiffenerPlate(L=BP.stiffener_plt_len_across_D - BP.weld_size_stiffener, W=BP.stiffener_plt_height, T=BP.stiffener_plt_thk,
-                                             L11=BP.stiffener_plt_len_across_D - BP.weld_size_stiffener - 50, L12=BP.stiffener_plt_height - 100, R21=15, R22=15)
-                stiff_alg_b = StiffenerPlate(L=BP.stiffener_plt_len_across_D - BP.weld_size_stiffener, W=BP.stiffener_plt_height, T=BP.stiffener_plt_thk,
-                                             L11=BP.stiffener_plt_len_across_D - BP.weld_size_stiffener - 50, L12=BP.stiffener_plt_height - 100, R21=15, R22=15)
-
-                weld_stiff_l_v = GrooveWeld(b=stiff_alg_l.T, h=BP.weld_size_stiffener, L=stiff_alg_l.W - stiff_alg_l.R22)
-                weld_stiff_l_h = GrooveWeld(b=stiff_alg_l.T, h=BP.weld_size_stiffener, L=stiff_alg_l.L - stiff_alg_l.R22)
-                weld_stiff_b_v = GrooveWeld(b=stiff_alg_b.T, h=BP.weld_size_stiffener, L=stiff_alg_b.W - stiff_alg_b.R22)
-                weld_stiff_b_h = GrooveWeld(b=stiff_alg_b.T, h=BP.weld_size_stiffener, L=stiff_alg_b.L - stiff_alg_b.R22)
-
-            baseplate = Plate(L=float(BP.bp_length_provided), W=float(BP.bp_width_provided), T=float(BP.plate_thk))
-
-            bolt_d = float(BP.anchor_dia_outside_flange)
-            bolt_r = bolt_d / 2  # Bolt radius (Shank part)
-            bolt_R = self.boltHeadDia_Calculation(bolt_d) / 2  # Bolt head diameter (Hexagon)
-            # bolt_T = self.boltHeadThick_Calculation(bolt_d)      # Bolt head thickness
-            nut_T = self.nutThick_Calculation(bolt_d)  # Nut thickness, usually nut thickness = nut height
-            nut_HT = nut_T
-
-            ex_length_out = BP.anchor_len_above_footing_out
-            if BP.anchor_type == 'IS 5624-Type A':
-                bolt = AnchorBolt_A(l=float(BP.anchor_len_below_footing_out), c=125, a=75,
-                                    r=float(BP.anchor_dia_outside_flange) / 2,
-                                    ex=ex_length_out)
-            elif BP.anchor_type == 'IS 5624-Type B':
-                bolt = AnchorBolt_B(l=float(BP.anchor_len_below_footing_out), r=float(BP.anchor_dia_outside_flange) / 2,
-                                    ex=ex_length_out)
-            else:  # BP.anchor_type == 'End Plate Type':
-                bolt = AnchorBolt_Endplate(l=float(BP.anchor_len_below_footing_out), r=float(BP.anchor_dia_outside_flange) / 2,  a= BP.plate_washer_dim_out*1.5,
-                                           ex=ex_length_out)
-
-            bolt_in = bolt
-
-            nut = Nut(R=bolt_R, T=nut_T, H=nut_HT, innerR1=bolt_r)
-            nut_in = nut
-            washer = Washer(a=BP.plate_washer_dim_out , d=BP.plate_washer_inner_dia_out , t=BP.plate_washer_thk_out)
-            washer_in = washer
-            nutSpace = bolt.c + baseplate.T
-            bolthight = washer.T + nut.T + 50
-
-            concrete = Plate(L=baseplate.L * 1.5, W=baseplate.W * 1.5, T=bolt.l * 1.2)
-            grout = Grout(L=baseplate.L * 1.5, W=baseplate.W * 1.5, T=50)
-
-            if BP.shear_key_along_ColDepth == 'Yes':
-                shearkey_1 = Plate(L=float(BP.shear_key_len_ColDepth), W=float(BP.shear_key_thk), T=float(BP.shear_key_depth_ColDepth))
-            else:
-                shearkey_1 = Plate(L=float(0), W=float(0), T=float(0))
-
-            if BP.shear_key_along_ColWidth == 'Yes':
-                shearkey_2 = Plate(L=float(BP.shear_key_thk), W=float(BP.shear_key_len_ColWidth), T=float(BP.shear_key_depth_ColWidth))
-            else:
-                shearkey_2 = Plate(L=float(0), W=float(0), T=float(0))
-
-            nut_bolt_array = bpNutBoltArray(BP, nut, nut_in, bolt, bolt_in, nutSpace,  washer, washer_in)
-
-            basePlate = HollowBasePlateCad(BP, sec, weld_sec, nut_bolt_array, bolthight, baseplate, concrete, grout,
-                                           stiff_alg_l, stiff_alg_b, weld_stiff_l_v, weld_stiff_l_h, weld_stiff_b_v,
-                                           weld_stiff_b_h, shearkey_1, shearkey_2)
-        else:
-            column_tw = float(BP.column_tw)
-            column_T = float(BP.column_tf)
-            column_d = float(BP.column_D)
-            column_B = float(BP.column_bf)
-            column_R1 = float(BP.column_r1)
-            column_R2 = float(BP.column_r2)
-            column_alpha = 94  # Todo: connect this. Waiting for danish to give variable
-            column_length = 1500
-
-            column = ISection(B=column_B, T=column_T, D=column_d, t=column_tw, R1=column_R1, R2=column_R2,
-                              alpha=column_alpha, length=column_length, notchObj=None)
-            baseplate = Plate(L=float(BP.bp_length_provided), W=float(BP.bp_width_provided), T=float(BP.plate_thk))
-
-            if BP.weld_type == 'Fillet Weld':
-                weldAbvFlang = FilletWeld(b=float(BP.weld_size_flange), h=float(BP.weld_size_flange), L=column.B)
-                weldBelwFlang = FilletWeld(b=float(BP.weld_size_flange), h=float(BP.weld_size_flange),
-                                           L=(column.B - column.t - 2 * (column.R1 + column.R2)) / 2)
-                weldSideWeb = FilletWeld(b=float(BP.weld_size_web), h=float(BP.weld_size_web),
-                                         L=column.D - 2 * (column.t + column.R1))
-            else:
-                BP.weld_size_flange = max(column.T/2, column.t/2)
-                BP.weld_size_web = BP.weld_size_flange
-                weldAbvFlang = GrooveWeld(b= column.T, h=float(BP.weld_size_flange), L=column.B)
-                weldBelwFlang = GrooveWeld(b= column.T, h=float(BP.weld_size_flange), L=column.B)
-                weldSideWeb = GrooveWeld(b=column.t, h=float(BP.weld_size_web), L=column.D)
-
-
-            BP.weld_size_stiffener = max(BP.stiffener_plt_thick_along_web, BP.stiffener_plt_thick_across_web, column.T) / 2
-            stiffener = StiffenerPlate(L=float(BP.stiffener_plt_len_along_web) - float(BP.weld_size_stiffener), W=float(BP.stiffener_plt_height_along_web),
-                                       T=float(BP.stiffener_plt_thick_along_web),
-                                       L11=float(BP.stiffener_plt_len_along_web - 50), L12=float(BP.stiffener_plt_height_along_web - 100), R21=15, R22=15)
-
-            concrete = Plate(L=baseplate.L * 2, W=baseplate.W * 2, T=float(BP.anchor_len_below_footing_out) * 1.5)
-            grout = Grout(L=concrete.L, W=concrete.W, T=50)
-
-            stiffener_acrsWeb = StiffenerPlate(L=float(BP.stiffener_plt_len_across_web) - float(BP.weld_size_stiffener), W=float(BP.stiffener_plt_height_across_web), T=float(BP.stiffener_plt_thick_across_web),
-                                               L11=float(BP.stiffener_plt_len_across_web) - 50, L12=float(BP.stiffener_plt_height_across_web) - 100,
-                                               R21=15, R22=15)  # todo: add L21 and L22 as max(15, weldsize + 3)
-
-            stiffener_algflangeL = Stiffener_flange(H=float(BP.stiffener_plt_height_along_flange), L=BP.stiffener_plt_len_along_flange - float(BP.weld_size_stiffener), T=BP.stiffener_plt_thick_along_flange,
-                                                    t_f=column.T, L_h=50, L_v=100, to_left=True)
-            stiffener_algflangeR = Stiffener_flange(H=float(BP.stiffener_plt_height_along_flange), L=BP.stiffener_plt_len_along_flange - float(BP.weld_size_stiffener), T= BP.stiffener_plt_thick_along_flange,
-                                                    t_f=column.T, L_h=50, L_v=100, to_left=False)
-            stiffener_algflange_tapperLength = (stiffener_algflangeR.T - column.T) * 5
-
-            stiffener_insideflange = StiffenerPlate(L= (column.D - 2*column.T - 2 * float(BP.weld_size_stiffener)), W= (column.B- column.t - 2*column.R1 - 2 * 5)/2, T =12,  R21 = column.R1 + 5, R22= column.R1 + 5, L21 = column.R1 + 5, L22= column.R1 + 5)  # self.extraspace=5
-
-
-            weld_stiffener_algflng_v = GrooveWeld(b=column.T, h=float(BP.weld_size_stiffener), L=stiffener_algflangeL.H)
-            weld_stiffener_algflng_h = FilletWeld(b=float(BP.weld_size_stiffener), h=float(BP.weld_size_stiffener),
-                                                  L=stiffener_algflangeL.L)  # Todo: create another weld for inner side of the stiffener
-            weld_stiffener_algflag_gh = GrooveWeld(b=stiffener_algflangeR.T, h=float(BP.weld_size_stiffener),
-                                                   L=stiffener_algflangeL.L - stiffener_algflange_tapperLength)
-
-            weld_stiffener_acrsWeb_v = GrooveWeld(b=stiffener_acrsWeb.T, h=float(BP.weld_size_stiffener),
-                                                  L=stiffener_acrsWeb.W - stiffener_acrsWeb.R22)
-            weld_stiffener_acrsWeb_h = FilletWeld(b=10, h=10, L=stiffener_acrsWeb.L - stiffener_acrsWeb.R22)
-            weld_stiffener_acrsWeb_gh = GrooveWeld(b=stiffener_acrsWeb.T, h=float(BP.weld_size_stiffener),
-                                                   L=stiffener_acrsWeb.L - stiffener_acrsWeb.R22)
-
-            # gussetweld = GrooveWeld(b=gusset.T, h=float(BP.weld_size_stiffener), L=gusset.L)
-            weld_stiffener_alongWeb_h = FilletWeld(b=float(BP.weld_size_stiffener), h=float(BP.weld_size_stiffener), L=stiffener.L - stiffener.R22)
-            weld_stiffener_alongWeb_v = GrooveWeld(b=stiffener.T, h=float(BP.weld_size_stiffener), L=stiffener.W - stiffener.R22)
-            weld_stiffener_alongWeb_gh = GrooveWeld(b=stiffener.T, h=float(BP.weld_size_stiffener), L=stiffener.L - stiffener.R22)
-
-            weld_stiffener_inflange = GrooveWeld(b=stiffener_insideflange.T, h=float(BP.weld_size_stiffener), L=stiffener_insideflange.W - stiffener_insideflange.R22)
-            weld_stiffener_inflange_d = GrooveWeld(b=stiffener_insideflange.T, h=float(BP.weld_size_stiffener),
-                                                   L=stiffener_insideflange.L - stiffener_insideflange.R22 - 2 * weld_stiffener_inflange.h)
-
-            if BP.load_axial_tension > 0:
-                BP.anchor_len_above_footing_in = BP.anchor_len_above_footing_in
-                BP.anchor_len_below_footing_in = BP.anchor_len_below_footing_in
-                BP.anchor_dia_inside_flange = BP.anchor_dia_inside_flange
-                BP.plate_washer_dim_in = BP.plate_washer_dim_in
-                BP.plate_washer_inner_dia_in = BP.plate_washer_inner_dia_in
-                BP.plate_washer_thk_in = BP.plate_washer_thk_in
-            else:
-                BP.anchor_len_above_footing_in = BP.anchor_len_above_footing_out
-                BP.anchor_len_below_footing_in = BP.anchor_len_below_footing_out
-                BP.anchor_dia_inside_flange = BP.anchor_dia_outside_flange
-                BP.plate_washer_dim_in = BP.plate_washer_dim_out
-                BP.plate_washer_inner_dia_in = BP.plate_washer_inner_dia_out
-                BP.plate_washer_thk_in = BP.plate_washer_thk_out
-
-            bolt_d = float(BP.anchor_dia_outside_flange)
-            bolt_r = bolt_d / 2  # Bolt radius (Shank part)
-            bolt_R = self.boltHeadDia_Calculation(bolt_d) / 2  # Bolt head diameter (Hexagon)
-            # bolt_T = self.boltHeadThick_Calculation(bolt_d)      # Bolt head thickness
-            nut_T = self.nutThick_Calculation(bolt_d)  # Nut thickness, usually nut thickness = nut height
-            nut_HT = nut_T
-
-            bolt_d_in = float(BP.anchor_dia_inside_flange)
-            bolt_r_in = bolt_d_in / 2  # Bolt radius (Shank part)
-            bolt_R_in = self.boltHeadDia_Calculation(bolt_d_in) / 2  # Bolt head diameter (Hexagon)
-            # bolt_T = self.boltHeadThick_Calculation(bolt_d)      # Bolt head thickness
-            nut_T_in = self.nutThick_Calculation(bolt_d_in)  # Nut thickness, usually nut thickness = nut height
-            nut_HT_in = nut_T_in
-
-            ex_length_out = BP.anchor_len_above_footing_out
-            ex_length_in = BP.anchor_len_above_footing_in
-            if BP.anchor_type == 'IS 5624-Type A':
-                bolt = AnchorBolt_A(l=float(BP.anchor_len_below_footing_out), c=125, a=75, r=float(BP.anchor_dia_outside_flange) / 2,
-                                    ex=ex_length_out)
-                bolt_in = AnchorBolt_A(l=float(BP.anchor_len_below_footing_in), c=125, a=75, r=float(BP.anchor_dia_inside_flange) / 2,
-                                    ex=ex_length_in)
-            elif BP.anchor_type == 'IS 5624-Type B':
-                bolt = AnchorBolt_B(l=float(BP.anchor_len_below_footing_out), r=float(BP.anchor_dia_outside_flange) / 2, ex=ex_length_out)
-                bolt_in = AnchorBolt_B(l=float(BP.anchor_len_below_footing_in), r=float(BP.anchor_dia_inside_flange) / 2,
-                                    ex=ex_length_in)
-            else: #BP.anchor_type == 'End Plate Type':
-                bolt = AnchorBolt_Endplate(l=float(BP.anchor_len_below_footing_out), r=float(BP.anchor_dia_outside_flange) / 2,  a= BP.plate_washer_dim_out * 1.5,
-                                           ex=ex_length_out)
-                bolt_in = AnchorBolt_Endplate(l=float(BP.anchor_len_below_footing_in),
-                                           r=float(BP.anchor_dia_inside_flange) / 2, a= BP.plate_washer_inner_dia_in * 1.5,
-                                           ex=ex_length_in)
-
-            nut = Nut(R=bolt_R, T=nut_T, H=nut_HT, innerR1=bolt_r)
-            nut_in = Nut(R=bolt_R_in, T=nut_T_in, H=nut_HT_in, innerR1=bolt_r_in)
-            washer = Washer(a=BP.plate_washer_dim_out , d=BP.plate_washer_inner_dia_out , t=BP.plate_washer_thk_out)
-            washer_in = Washer(a=BP.plate_washer_dim_in, d=BP.plate_washer_inner_dia_in, t=BP.plate_washer_thk_out)
-            nutSpace = bolt.c + baseplate.T
-            bolthight = washer.T + nut.T + 50
-
-            if BP.shear_key_along_ColDepth == 'Yes':
-                shearkey_1 = Plate(L=float(BP.shear_key_len_ColDepth), W=float(BP.shear_key_thk), T=float(BP.shear_key_depth_ColDepth))
-            else:
-                shearkey_1 = Plate(L=float(0), W=float(0), T=float(0))
-
-            if BP.shear_key_along_ColWidth == 'Yes':
-                shearkey_2 = Plate(L=float(BP.shear_key_thk), W=float(BP.shear_key_len_ColWidth), T=float(BP.shear_key_depth_ColWidth))
-            else:
-                shearkey_2 = Plate(L=float(0), W=float(0), T=float(0))
-
-            nut_bolt_array = bpNutBoltArray(BP, nut, nut_in, bolt, bolt_in, nutSpace, washer, washer_in)
-
-            basePlate = BasePlateCad(BP, column, nut_bolt_array, bolthight, baseplate, shearkey_1, shearkey_2, weldAbvFlang, weldBelwFlang, weldSideWeb,
-                                     concrete, stiffener, grout, weld_stiffener_alongWeb_h, weld_stiffener_alongWeb_gh, weld_stiffener_alongWeb_v,
-                                     stiffener_algflangeL, stiffener_algflangeR, stiffener_acrsWeb, weld_stiffener_algflng_v, weld_stiffener_algflng_h, weld_stiffener_algflag_gh,
-                                     weld_stiffener_acrsWeb_v, weld_stiffener_acrsWeb_h, weld_stiffener_acrsWeb_gh, stiffener_insideflange, weld_stiffener_inflange, weld_stiffener_inflange_d)
-
-        basePlate.create_3DModel()
-
-        return basePlate
-
-    def createTensionCAD(self):
-        """
-        :return: The calculated values/parameters to create 3D CAD model of individual components.
-        """
-        T = self.module_class
-
-        # Types of connections =  #'Angles', 'Back to Back Angles', 'Star Angles', 'Channels', 'Back to Back Channels'
-        print("Creating Tension CAD for connection type: ", self.connection)
-        if self.connection == KEY_DISP_TENSION_BOLTED:
-            bolt_d = float(T.bolt.bolt_diameter_provided)  # Bolt diameter (shank part), entered by user
-            bolt_r = bolt_d / 2  # Bolt radius (Shank part)
-            bolt_T = self.boltHeadThick_Calculation(bolt_d)  # Bolt head thickness
-            bolt_R = self.boltHeadDia_Calculation(bolt_d) / 2  # Bolt head diameter (Hexagon)
-            bolt_Ht = self.boltLength_Calculation(bolt_d)  # Bolt head height
-
-            bolt = Bolt(R=bolt_R, T=bolt_T, H=bolt_Ht, r=bolt_r)  # Call to create Bolt from Component directory
-            nut_T = self.nutThick_Calculation(bolt_d)  # Nut thickness, usually nut thickness = nut height
-            nut_Ht = nut_T
-            nut = Nut(R=bolt_R, T=nut_T, H=nut_Ht, innerR1=bolt_r)  # Call to create Nut from Component directory
-
-            plate = GassetPlate(L=float(T.plate.length + 50), H=float(T.plate.height),
-                                T=float(T.plate.thickness_provided), degree=30)
-            intermittentPlates = Plate(L=float(T.inter_plate_height), W=float(T.inter_plate_length), T=float(plate.T))
-
-
-            if T.sec_profile == 'Channels' or T.sec_profile == 'Back to Back Channels':
-                member = Channel(B=float(T.section_size_1.flange_width), T=float(T.section_size_1.flange_thickness),
-                                 D=float(T.section_size_1.depth), t=float(T.section_size_1.web_thickness),
-                                 R1=float(T.section_size_1.root_radius), R2=float(T.section_size_1.toe_radius),
-                                 L=float(T.length))
-                if T.sec_profile == 'Channels':
-                    nut_space = member.t + plate.T + nut.T  # member.T + plate.T + nut.T
-
-                else:
-                    nut_space = 2 * member.t + plate.T + nut.T  # 2*member.T + plate.T + nut.T
-
-                intermittentConnection = IntermittentNutBoltPlateArray(T, nut, bolt, intermittentPlates, nut_space)
-                nut_bolt_array = TNutBoltArray(T, nut, bolt, nut_space)
-                tensionCAD = TensionChannelBoltCAD(T, member, plate, nut_bolt_array, intermittentConnection)
-
-            else:
-                member = Angle(L=float(T.length), A=float(T.section_size_1.max_leg), B=float(T.section_size_1.min_leg),
-                               T=float(T.section_size_1.thickness), R1=float(T.section_size_1.root_radius),
-                               R2=float(T.section_size_1.toe_radius))
-                if T.sec_profile == 'Back to Back Angles':
-                    nut_space = 2 * member.T + plate.T + nut.T
-                else:
-                    nut_space = member.T + plate.T + nut.T
-
-                intermittentConnection = IntermittentNutBoltPlateArray(T, nut, bolt, intermittentPlates, nut_space)
-                nut_bolt_array = TNutBoltArray(T, nut, bolt, nut_space)
-                tensionCAD = TensionAngleBoltCAD(T, member, plate, nut_bolt_array, intermittentConnection)
-
-        else:
-            plate = GassetPlate(L=float(T.plate.length + 50), H=float(T.plate.height),
-                                T=float(T.plate.thickness_provided), degree=30)
-
-            intermittentPlates = Plate(L=float(T.inter_plate_height), W=float(T.inter_plate_length), T=plate.T)
-            intermittentWelds = FilletWeld(h=float(T.inter_weld_size), b=float(T.inter_weld_size), L=intermittentPlates.W)
-            weld_plate_array = IntermittentWelds(T, intermittentWelds, intermittentPlates)
-
-            s = max(15, float(T.weld.size))
-            plate_intercept = plate.L - s - 50
-            if T.sec_profile == 'Channels' or T.sec_profile == 'Back to Back Channels':
-                member = Channel(B=float(T.section_size_1.flange_width), T=float(T.section_size_1.flange_thickness),
-                                 D=float(T.section_size_1.depth), t=float(T.section_size_1.web_thickness),
-                                 R1=float(T.section_size_1.root_radius), R2=float(T.section_size_1.toe_radius),
-                                 L=float(T.length))
-                inline_weld = FilletWeld(b=float(T.weld.size), h=float(T.weld.size), L=float(plate_intercept))
-                opline_weld = FilletWeld(b=float(T.weld.size), h=float(T.weld.size), L=float(member.D))
-
-
-                tensionCAD = TensionChannelWeldCAD(T, member, plate, inline_weld, opline_weld, weld_plate_array)
-
-            else:
-                member = Angle(L=float(T.length), A=float(T.section_size_1.max_leg), B=float(T.section_size_1.min_leg),
-                               T=float(T.section_size_1.thickness), R1=float(T.section_size_1.root_radius),
-                               R2=float(T.section_size_1.toe_radius))
-                inline_weld = FilletWeld(b=float(T.weld.size), h=float(T.weld.size), L=float(plate_intercept))
-                if T.loc == 'Long Leg':
-                    opline_weld = FilletWeld(b=float(T.weld.size), h=float(T.weld.size), L=float(member.A))
-                else:  # 'Short Leg'
-                    opline_weld = FilletWeld(b=float(T.weld.size), h=float(T.weld.size), L=float(member.B))
-
-                # weld_plate_array = IntermittentWelds(T, intermittentWelds, intermittentPlates)
-                tensionCAD = TensionAngleWeldCAD(T, member, plate, inline_weld, opline_weld, weld_plate_array)
-
-        tensionCAD.create_3DModel()
-
-        return tensionCAD
-
-    def display_3DModel(self, component, bgcolor):
-
-        self.component = component
-
-        self.display.EraseAll()
-
-        self.display.View_Iso()
-
-        self.display.FitAll()
-
-        self.display.DisableAntiAliasing()
-
-        if bgcolor == "gradient_bg":
-
-            self.display.set_bg_gradient_color([51, 51, 102], [150, 150, 170])
-        else:
-            self.display.set_bg_gradient_color([255, 255, 255], [255, 255, 255])
-
-        if self.mainmodule  == "Shear Connection":
-
-            A = self.module_class()
-
-            self.loc = A.connectivity
-
-
-            if self.loc == "Column Flange-Beam Web" and (self.connection == KEY_DISP_FINPLATE or self.connection == 'FinPlateConnection'):
-                # pass
-                # print("hghghghg")
-                self.display.View.SetProj(OCC.Core.V3d.V3d_XnegYnegZpos)
-            elif self.loc == "Column Flange-Beam Web" and (self.connection == KEY_DISP_SEATED_ANGLE or self.connection == 'Seated-Angle-Connection'):
-                print(f"CAD - SeatedAngle display setup 1")
-                self.display.View.SetProj(OCC.Core.V3d.V3d_XnegYnegZpos)
-            elif self.loc == "Column Flange-Beam Web" and (self.connection == KEY_DISP_SEATED_ANGLE or self.connection == 'Seated-Angle-Connection'):
-                print(f"CAD - SeatedAngle display setup 2")
-                self.display.View.SetProj(OCC.Core.V3d.V3d_XposYnegZpos)
-
-            if self.component == "Column":
-                osdag_display_shape(self.display, self.connectivityObj.get_columnModel(), update=True)
-            elif self.component == "Beam":
-                osdag_display_shape(self.display, self.connectivityObj.get_beamModel(), material=Graphic3d_NOT_2D_ALUMINUM,
-                                    update=True)
-            elif component == "cleatAngle":
-
-                osdag_display_shape(self.display, self.connectivityObj.angleModel, color=Quantity_NOC_BLUE1, update=True)
-                osdag_display_shape(self.display, self.connectivityObj.angleLeftModel, color=Quantity_NOC_BLUE1,
-                                    update=True)
-                nutboltlist = self.connectivityObj.nut_bolt_array.get_models()
-                for nutbolt in nutboltlist:
-                    osdag_display_shape(self.display, nutbolt, color=Quantity_NOC_SADDLEBROWN, update=True)
-
-            elif component == "SeatedAngle":
-                osdag_display_shape(self.display, self.connectivityObj.topclipangleModel, color=Quantity_NOC_BLUE1,
-                                    update=True)
-                osdag_display_shape(self.display, self.connectivityObj.angleModel, color=Quantity_NOC_BLUE1, update=True)
-                nutboltlist = self.connectivityObj.nut_bolt_array.get_models()
-                for nutbolt in nutboltlist:
-                    osdag_display_shape(self.display, nutbolt, color=Quantity_NOC_SADDLEBROWN, update=True)
-
-            elif self.component == "Plate":
-                osdag_display_shape(self.display, self.connectivityObj.weldModelLeft, color=Quantity_NOC_RED, update=True)
-                osdag_display_shape(self.display, self.connectivityObj.weldModelRight, color=Quantity_NOC_RED, update=True)
-                osdag_display_shape(self.display, self.connectivityObj.plateModel, color=Quantity_NOC_BLUE4, update=True)
-                nutboltlist = self.connectivityObj.nut_bolt_array.get_models()
-                for nutbolt in nutboltlist:
-                    osdag_display_shape(self.display, nutbolt, color=Quantity_NOC_SADDLEBROWN, update=True)
-
-            elif self.component == "Model":
-
-                osdag_display_shape(self.display, self.connectivityObj.columnModel, update=True)
-                osdag_display_shape(self.display, self.connectivityObj.beamModel, material=Graphic3d_NOT_2D_ALUMINUM,
-                                    update=True)
-                if self.connection == KEY_DISP_FINPLATE or self.connection == 'FinPlateConnection' or self.connection == KEY_DISP_ENDPLATE or self.connection == 'EndPlateConnection':
-                    print(f"CAD - FinPlate/EndPlate display branch selected")
-                    osdag_display_shape(self.display, self.connectivityObj.weldModelLeft, color=Quantity_NOC_RED, update=True)
-                    osdag_display_shape(self.display, self.connectivityObj.weldModelRight, color=Quantity_NOC_RED, update=True)
-                    osdag_display_shape(self.display, self.connectivityObj.plateModel, color=Quantity_NOC_BLUE1,
-                                        update=True)
-
-                elif self.connection == KEY_DISP_CLEATANGLE:
-                    osdag_display_shape(self.display, self.connectivityObj.angleModel, color=Quantity_NOC_BLUE1,
-                                        update=True)
-                    osdag_display_shape(self.display, self.connectivityObj.angleLeftModel, color=Quantity_NOC_BLUE1,
-                                        update=True)
-                else:
-                    osdag_display_shape(self.display, self.connectivityObj.topclipangleModel, color=Quantity_NOC_BLUE1,
-                                        update=True)
-                    osdag_display_shape(self.display, self.connectivityObj.angleModel, color=Quantity_NOC_BLUE1,
-                                        update=True)
-                nutboltlist = self.connectivityObj.nut_bolt_array.get_models()
-                for nutbolt in nutboltlist:
-                    osdag_display_shape(self.display, nutbolt, color=Quantity_NOC_SADDLEBROWN, update=True)
-
-        if self.mainmodule == "Moment Connection":
-            if self.connection == KEY_DISP_BEAMCOVERPLATE:
-
-                self.B = self.module_class()
-                # else:
-                #     pass
-                #
-                # self.loc = A.connectivity
-                self.CPObj = self.createBBCoverPlateCAD()  # CPBoltedObj is an object which gets all the calculated values of CAD models
-                if self.component == "Beam":
-                    # Displays both beams
-                    osdag_display_shape(self.display, self.CPObj.get_only_beams_Models(), update=True)
-
-                elif self.component == "Connector":
-                    osdag_display_shape(self.display, self.CPObj.get_flangewebplatesModel(), update=True,
-                                        color=Quantity_NOC_BLUE1)
-                    if self.B.preference != 'Outside':
-                        osdag_display_shape(self.display, self.CPObj.get_innetplatesModels(), update=True,
-                                            color=Quantity_NOC_BLUE1)
-
-                    osdag_display_shape(self.display, self.CPObj.get_nut_bolt_arrayModels(), update=True,
-                                        color=Quantity_NOC_YELLOW)
-
-                elif self.component == "Model":
-                    osdag_display_shape(self.display, self.CPObj.get_beamsModel(), update=True)
-                    osdag_display_shape(self.display, self.CPObj.get_flangewebplatesModel(), update=True,
-                                        color=Quantity_NOC_BLUE1)
-
-                    # Todo: remove velove commented lines
-
-                    if self.B.preference != 'Outside':
-                        osdag_display_shape(self.display, self.CPObj.get_innetplatesModels(), update=True,
-                                            color=Quantity_NOC_BLUE1)
-
-                    osdag_display_shape(self.display, self.CPObj.get_nut_bolt_arrayModels(), update=True,
-                                        color=Quantity_NOC_YELLOW)
-            elif self.connection == KEY_DISP_BB_EP_SPLICE:
-                self.B = self.module_class()
-
-                self.ExtObj = self.createBBEndPlateCAD()
-
-                if component == "Beam":
-                    osdag_display_shape(self.display, self.ExtObj.get_beam_models(), update=True)
-
-                elif component == "Connector":
-                    osdag_display_shape(self.display, self.ExtObj.get_plate_connector_models(), update=True,
-                                        color='Blue')
-                    osdag_display_shape(self.display, self.ExtObj.get_welded_models(), update=True, color='Red')
-                    osdag_display_shape(self.display, self.ExtObj.get_nut_bolt_array_models(), update=True,
-                                        color=Quantity_NOC_SADDLEBROWN)
-
-                elif component == "Model":
-
-                    # osdag_display_shape(self.display, self.ExtObj.get_models(), update=True)
-                    osdag_display_shape(self.display, self.ExtObj.get_beam_models(), update=True)
-                    osdag_display_shape(self.display, self.ExtObj.get_plate_connector_models(), update=True,
-                                        color='Blue')
-                    osdag_display_shape(self.display, self.ExtObj.get_welded_models(), update=True, color='Red')
-                    osdag_display_shape(self.display, self.ExtObj.get_nut_bolt_array_models(), update=True,
-                                        color=Quantity_NOC_SADDLEBROWN)
-
-
-
-            elif self.connection == KEY_DISP_BEAMCOVERPLATEWELD:
-                self.B = self.module_class()
-                self.CPObj = self.createBBCoverPlateCAD()
-                beams = self.CPObj.get_beam_models()
-                plates = self.CPObj.get_plate_models()
-                welds = self.CPObj.get_welded_modules()
-
-                if self.component == "Beam":
-                    # Displays both beams
-                    osdag_display_shape(self.display, beams, update=True)
-                elif self.component == "Connector":
-                    osdag_display_shape(self.display, plates, update=True, color=Quantity_NOC_BLUE1)
-                    osdag_display_shape(self.display, welds, update=True, color=Quantity_NOC_RED)
-                elif self.component == "Model":
-                    osdag_display_shape(self.display, beams, update=True)
-                    osdag_display_shape(self.display, plates, update=True, color=Quantity_NOC_BLUE1)
-                    osdag_display_shape(self.display, welds, update=True, color=Quantity_NOC_RED)
-
-            elif self.connection == KEY_DISP_COLUMNCOVERPLATE:
-                self.C = self.module_class
-                self.CPObj = self.createCCCoverPlateCAD()
-                columns = self.CPObj.get_column_models()
-                plates = self.CPObj.get_plate_models()
-                nutbolt = self.CPObj.get_nut_bolt_models()
-                onlycolumn = self.CPObj.get_only_column_models()
-
-                if self.component == "Column":
-                    # Displays both beams
-                    osdag_display_shape(self.display, onlycolumn, update=True)
-                elif self.component == "Cover Plate":
-                    osdag_display_shape(self.display, plates, update=True, color=Quantity_NOC_BLUE1)
-                    osdag_display_shape(self.display, nutbolt, update=True, color=Quantity_NOC_YELLOW)
-                elif self.component == "Model":
-                    osdag_display_shape(self.display, columns, update=True)
-                    osdag_display_shape(self.display, plates, update=True, color=Quantity_NOC_BLUE1)
-                    osdag_display_shape(self.display, nutbolt, update=True, color=Quantity_NOC_YELLOW)
-
-
-            elif self.connection == KEY_DISP_BCENDPLATE:
-                self.Bc = self.module_class()
-                self.ExtObj = self.createBCEndPlateCAD()
-
-                self.display.View.SetProj(OCC.Core.V3d.V3d_XnegYnegZpos)
-                c_length = self.column_length
-                # Point1 = gp_Pnt(0.0, 0.0, c_length)
-                # DisplayMsg(self.display, Point1, self.Bc.supporting_section.designation)
-                b_length = self.beam_length + self.Bc.supporting_section.depth/2+100
-                # Point2 = gp_Pnt(0.0,-b_length, c_length/2)
-                # DisplayMsg(self.display, Point2, self.Bc.supported_section.designation)
-                # Displays the beams #TODO ANAND
-                if component == "Column":
-                    self.display.View_Iso()
-                    osdag_display_shape(self.display, self.ExtObj.columnModel, update=True)
-                    # Point1 = gp_Pnt(-self.Bc.supporting_section.flange_width/2, 0, c_length)
-                    # DisplayMsg(self.display, Point1, self.Bc.supporting_section.designation)
-                    # Point = gp_Pnt(0.0, 0.0, 10)
-                    # DisplayMsg(self.display,Point, "Column")
-
-                elif component == "Beam":
-                    self.display.View_Iso()
-                    osdag_display_shape(self.display, self.ExtObj.beamModel, update=True,
-                                        material=Graphic3d_NOT_2D_ALUMINUM)
-                    # Point2 = gp_Pnt(0.0, -b_length, c_length / 2)
-                    # DisplayMsg(self.display, Point2, self.Bc.supported_section.designation)
-                    # , color = 'Dark Gray'
-
-                elif component == "Connector":
-                    osdag_display_shape(self.display, self.ExtObj.get_plate_connector_models(), update=True,
-                                        color='Blue')
-                    osdag_display_shape(self.display, self.ExtObj.get_welded_models(), update=True, color='Red')
-                    osdag_display_shape(self.display, self.ExtObj.get_nut_bolt_array_models(), update=True,
-                                        color=Quantity_NOC_SADDLEBROWN)
-
-
-                elif component == "Model":
-
-                    osdag_display_shape(self.display, self.ExtObj.get_column_models(), update=True)
-                    osdag_display_shape(self.display, self.ExtObj.get_beam_models(), update=True,
-                                        material=Graphic3d_NOT_2D_ALUMINUM)
-                    osdag_display_shape(self.display, self.ExtObj.get_plate_connector_models(), update=True,
-                                        color='Blue')
-                    osdag_display_shape(self.display, self.ExtObj.get_welded_models(), update=True, color='Red')
-                    osdag_display_shape(self.display, self.ExtObj.get_nut_bolt_array_models(), update=True,
-                                        color=Quantity_NOC_SADDLEBROWN)
-                    # Point1 = gp_Pnt(self.Bc.supporting_section.flange_width/2, -self.Bc.supporting_section.depth/2, c_length*0.75)
-                    # DisplayMsg(self.display, Point1, self.Bc.supporting_section.designation)
-                    # Point2 = gp_Pnt(self.Bc.supporting_section.flange_width/2, -b_length, c_length / 2)
-                    # DisplayMsg(self.display, Point2, self.Bc.supported_section.designation)
-                    # Erase(DisplayMsg(self.display, Point2, self.Bc.supported_section.designation))
-
-
-            elif self.connection == KEY_DISP_COLUMNCOVERPLATEWELD:
-                self.C = self.module_class()
-                self.CPObj = self.createCCCoverPlateCAD()
-                columns = self.CPObj.get_column_models()
-                plates = self.CPObj.get_plate_models()
-                welds = self.CPObj.get_welded_modules()
-
-                if self.component == "Column":
-                    # Displays both beams
-                    osdag_display_shape(self.display, columns, update=True)
-                elif self.component == "Cover Plate":
-                    osdag_display_shape(self.display, plates, update=True, color=Quantity_NOC_BLUE1)
-                    osdag_display_shape(self.display, welds, update=True, color=Quantity_NOC_RED)
-                elif self.component == "Model":
-                    osdag_display_shape(self.display, columns, update=True)
-                    osdag_display_shape(self.display, plates, update=True, color=Quantity_NOC_BLUE1)
-                    osdag_display_shape(self.display, welds, update=True, color=Quantity_NOC_RED)
-
-            elif self.connection == KEY_DISP_COLUMNENDPLATE:
-                self.CEP = self.module_class()
-                self.CEPObj = self.createCCEndPlateCAD()
-                columns = self.CEPObj.get_column_models()
-                plates = self.CEPObj.get_plate_models()
-                welds = self.CEPObj.get_weld_models()
-                nutBolts = self.CEPObj.get_nut_bolt_models()
-
-                if self.component == "Column":
-                    osdag_display_shape(self.display, columns, update=True)
-
-                elif self.component == "Connector":
-                    osdag_display_shape(self.display, plates, update=True, color=Quantity_NOC_BLUE1)
-                    osdag_display_shape(self.display, welds, update=True, color=Quantity_NOC_RED)
-                    osdag_display_shape(self.display, nutBolts, update=True, color=Quantity_NOC_YELLOW)
-
-                elif self.component == "Model":
-                    osdag_display_shape(self.display, columns, update=True)
-                    osdag_display_shape(self.display, plates, update=True, color=Quantity_NOC_BLUE1)
-                    osdag_display_shape(self.display, welds, update=True, color=Quantity_NOC_RED)
-                    osdag_display_shape(self.display, nutBolts, update=True, color=Quantity_NOC_YELLOW)
-
-            elif self.connection == KEY_DISP_BASE_PLATE:
-                self.Bp = self.module_class
-
-                self.BPObj = self.createBasePlateCAD()
-
-                column = self.BPObj.get_column_model()
-                plate = self.BPObj.get_plate_connector_models()
-                weld = self.BPObj.get_welded_models()
-                nut_bolt = self.BPObj.get_nut_bolt_array_models()
-                conc = self.BPObj.get_concrete_models()
-                grout = self.BPObj.get_grout_models()
-
-                if self.component == "Model":  # Todo: change this into key
-                    osdag_display_shape(self.display, column, update=True)
-                    osdag_display_shape(self.display, plate, color=Quantity_NOC_BLUE1, update=True)
-                    osdag_display_shape(self.display, weld, color=Quantity_NOC_RED, update=True)
-                    osdag_display_shape(self.display, nut_bolt, color=Quantity_NOC_YELLOW, update=True)
-                    osdag_display_shape(self.display, conc, color=GRAY, transparency=0.5, update=True)
-                    osdag_display_shape(self.display, grout, color=GRAY, transparency=0.5, update=True)
-
-                elif self.component == "Column":
-                    osdag_display_shape(self.display, column, update=True)
-
-                elif self.component == "Connector":
-                    osdag_display_shape(self.display, plate, color=Quantity_NOC_BLUE1, update=True)
-                    osdag_display_shape(self.display, weld, color=Quantity_NOC_RED, update=True)
-                    osdag_display_shape(self.display, nut_bolt, color=Quantity_NOC_YELLOW, update=True)
-
-        else:
-            if self.connection == KEY_DISP_TENSION_BOLTED:
-                self.T = self.module_class()
-                print("Creating Tension CAD for connection type: ", self.connection)
-                self.TObj = self.createTensionCAD()
-                print("TObj created: ", self.TObj)
-
-                member = self.TObj.get_members_models()
-                print("Member models: ", member)
-                plate = self.TObj.get_plates_models()
-                print("Plate models: ", plate)
-
-                nutbolt = self.TObj.get_nut_bolt_array_models()
-                print("Nutbolt models: ", nutbolt)
-
-                onlymember = self.TObj.get_only_members_models()
-                print("Only member models: ", onlymember)
-                # distance = self.T.length/2 - (2* self.T.plate.end_dist_provided + (self.T.plate.bolt_line - 1 ) * self.T.plate.pitch_provided)
-                # Point = gp_Pnt(distance, 0.0, 300)
-                # DisplayMsg(self.display, Point, self.T.section_size_1.designation)
-
-
-                if self.component == "Member":  # Todo: change this into key
-                    osdag_display_shape(self.display, onlymember, update=True)
-                elif self.component == "Plate":
-                    osdag_display_shape(self.display, plate, color=Quantity_NOC_BLUE1, update=True)
-                    osdag_display_shape(self.display, nutbolt, color=Quantity_NOC_YELLOW, update=True)
-                elif self.component == "Endplate":
-                    endplate = self.TObj.get_end_plates_models()
-                    end_nutbolt = self.TObj.get_end_nut_bolt_array_models()
-                    osdag_display_shape(self.display, endplate, color=Quantity_NOC_BLUE1, update=True)
-                    osdag_display_shape(self.display, end_nutbolt, color=Quantity_NOC_YELLOW, update=True)
-                else:
-                    connector = BRepAlgoAPI_Fuse(nutbolt, plate).Shape()
-                    shape = BRepAlgoAPI_Fuse(connector, member).Shape()
-                    self.TObj.shape = shape
-                    osdag_display_shape(self.display, member, update=True)
-                    osdag_display_shape(self.display, plate, color=Quantity_NOC_BLUE1, update=True)
-                    osdag_display_shape(self.display, nutbolt, color=Quantity_NOC_YELLOW, update=True)
-
-
-            elif self.connection == KEY_DISP_TENSION_WELDED:
-                self.T = self.module_class()
-                self.TObj = self.createTensionCAD()
-
-                member = self.TObj.get_members_models()
-                plate = self.TObj.get_plates_models()
-                welds = self.TObj.get_welded_models()
-                if self.component == "Member":  # Todo: change this into key
-                    osdag_display_shape(self.display, member, update=True)
-                elif self.component == "Plate":
-                    osdag_display_shape(self.display, plate, color=Quantity_NOC_BLUE1, update=True)
-                    osdag_display_shape(self.display, welds, color=Quantity_NOC_RED, update=True)
-                elif self.component == "Endplate":
-                    endplate = self.TObj.get_end_plates_models()
-                    osdag_display_shape(self.display, endplate, color=Quantity_NOC_BLUE1, update=True)
-                else:
-                    connector = BRepAlgoAPI_Fuse(welds, plate).Shape()
-                    shape = BRepAlgoAPI_Fuse(connector, member).Shape()
-                    self.TObj.shape = shape
-                    osdag_display_shape(self.display, member, update=True)
-                    osdag_display_shape(self.display, plate, color=Quantity_NOC_BLUE1, update=True)
-                    osdag_display_shape(self.display, welds, color=Quantity_NOC_RED, update=True)
-    #
-    # def display_msg(self):
-    #     if self.connection == KEY_DISP_TENSION_BOLTED:
-    #         self.T = self.module_class()
-    #         #
-    #         # distance = self.T.length / 2 - (
-    #         #             2 * self.T.plate.end_dist_provided + (self.T.plate.bolt_line - 1) * self.T.plate.pitch_provided)
-    #         # Point = gp_Pnt(distance, 0.0, 300)
-    #         self.display_msg()
-
-
-
-    def call_3DModel(self, flag, module_class):  # Done
-
-        self.module_class = module_class
-
-        if self.mainmodule == "Shear Connection":
-
-            A = self.module_class()
-
-            self.loc = A.connectivity
-
-            if flag is True:
-
-                if self.loc == CONN_CWBW:
-                    self.connectivityObj = self.create3DColWebBeamWeb()
-
-                elif self.loc == CONN_CFBW:
-                    self.connectivityObj = self.create3DColFlangeBeamWeb()
-
-                else:
-                    self.connectivityObj = self.create3DBeamWebBeamWeb()
-                self.display_3DModel("Model","gradient_bg")
-            else:
-                self.display.EraseAll()
-
-        elif self.mainmodule == "Moment Connection":
-
-            if self.connection == KEY_DISP_BEAMCOVERPLATE or self.connection == KEY_DISP_BEAMCOVERPLATEWELD:
-                if flag is True:
-
-                    self.CPObj = self.createBBCoverPlateCAD()
-
-                    self.display_3DModel("Model", "gradient_bg")
-                else:
-                    self.display.EraseAll()
-
-            elif self.connection == KEY_DISP_BB_EP_SPLICE:
-                if flag is True:
-
-                    self.CPObj = self.createBBEndPlateCAD()
-
-                    self.display_3DModel("Model", "gradient_bg")
-
-                else:
-                    self.display.EraseAll()
-
-            elif self.connection == KEY_DISP_BCENDPLATE:
-                if flag is True:
-
-                    self.CPObj = self.createBCEndPlateCAD()
-
-                    self.display_3DModel("Model", "gradient_bg")
-
-                else:
-                    self.display.EraseAll()
-
-            elif self.connection == KEY_DISP_COLUMNCOVERPLATE or self.connection == KEY_DISP_COLUMNCOVERPLATEWELD:
-                if flag is True:
-
-                    self.CPObj = self.createCCCoverPlateCAD()
-
-                    self.display_3DModel("Model", "gradient_bg")
-
-                else:
-                    self.display.EraseAll()
-
-            elif self.connection == KEY_DISP_COLUMNENDPLATE:
-                if flag is True:
-                    self.CEPObj = self.createCCEndPlateCAD()
-
-                    self.display_3DModel("Model", "gradient_bg")
-                else:
-                    self.display.EraseAll()
-
-            elif self.connection == KEY_DISP_BASE_PLATE:
-
-                if flag is True:
-                    self.BPObj = self.createBasePlateCAD()
-
-                    self.display_3DModel("Model", "gradient_bg")
-
-                else:
-                    self.display.EraseAll()
-
-        else:
-            if self.connection == KEY_DISP_TENSION_BOLTED or self.connection == KEY_DISP_TENSION_WELDED:
-
-                if flag is True:
-                    self.TObj = self.createTensionCAD()
-
-                    self.display_3DModel("Model", "gradient_bg")
-
-                else:
-                    self.display.EraseAll()
-
-    # def call_saveOutputs(self):  # Done
-    #     return self.call_calculation(self.uiObj)
-    #
-    # def call2D_Drawing(self, viKEY_DISP_BASE_PLATEew, fileName, folder):  # Rename function with call_view_images()
-    #     ''' This routine saves the 2D SVG image as per the connectivity selected
-    #     SVG image created through svgwrite package which takes design INPUT and OUTPUT parameters from Finplate GUI.
-    #     '''
-    #     if view == "All":
-    #
-    #         self.callDesired_View(fileName, view, folder)
-    #         # self.display.set_bg_gradient_color(255, 255, 255, 255, 255, 255)
-    #         #
-    #         # data = os.path.join(str(folder), "images_html", "3D_Model.png")
-    #         #
-    #         # self.display.ExportToImage(data)
-    #         #
-    #         # # self.display.set_bg_gradient_color(51, 51, 102, 150, 150, 170)
-    #         # self.display.View_Iso()
-    #         # self.display.FitAll()
-    #
-    #     else:
-    #
-    #         f = open(fileName, 'w')
-    #
-    #         self.callDesired_View(fileName, view, folder)
-    #         f.close()
-    #
-    # def callDesired_View(self, fileName, view, folder):
-    #
-    #     if self.connection == "Fin Plate":
-    #         finCommonObj = FinCommonData(self.uiObj, self.resultObj, self.dictbeamdata, self.dictcoldata, folder)
-    #         finCommonObj.saveToSvg(str(fileName), view)
-    #     elif self.connection == "Endplate":
-    #         endCommonObj = EndCommonData(self.uiObj, self.resultObj, self.dictbeamdata, self.dictcoldata, folder)
-    #         endCommonObj.save_to_svg(str(fileName), view)
-    #     elif self.connection == "cleatAngle":
-    #         cleatCommonObj = cleatCommonData(self.uiObj, self.resultObj, self.dictbeamdata, self.dictcoldata,
-    #                                          self.dictangledata, folder)
-    #         cleatCommonObj.save_to_svg(str(fileName), view)
-    #     else:
-    #         seatCommonObj = SeatCommonData(self.uiObj, self.resultObj, self.dictbeamdata, self.dictcoldata,
-    #                                        self.dictangledata, self.dicttopangledata, folder)
-    #         seatCommonObj.save_to_svg(str(fileName), view)
-    #
-    # def call_saveMessages(self):  # Done
-    #
-    #     if self.connection == "Fin Plate":
-    #         fileName = os.path.join("Connections", "Shear", "Fin Plate", "fin.log")
-    #
-    #     elif self.connection == "Endplate":
-    #         fileName = os.path.join("Connections", "Shear", "Endplate", "end.log")
-    #
-    #     elif self.connection == "cleatAngle":
-    #         fileName = os.path.join("Connections", "Shear", "cleatAngle", "cleat.log")
-    #
-    #     else:
-    #         fileName = os.path.join("Connections", "Shear", "SeatedAngle", "seatangle.log")
-    #
-    #     return fileName
-    #
-    # def call_designReport(self, htmlfilename, profileSummary):
-    #
-    #     fileName = str(htmlfilename)
-    #
-    #     if self.connection == "Fin Plate":
-    #         fin_save_html(self.resultObj, self.uiObj, self.dictbeamdata, self.dictcoldata, profileSummary,
-    #                       htmlfilename, self.folder)
-    #     elif self.connection == "Endplate":
-    #         end_save_html(self.resultObj, self.uiObj, self.dictbeamdata, self.dictcoldata, profileSummary,
-    #                       htmlfilename, self.folder)
-    #     elif self.connection == "cleatAngle":
-    #         cleat_save_html(self.resultObj,self.uiObj,self.dictbeamdata,self.dictcoldata,self.dictangledata,
-    #                         profileSummary,htmlfilename, self.folder)
-    #     else:
-    #         self.sa_report = ReportGenerator(self.sa_calc_obj)
-    #         self.sa_report.save_html(profileSummary,htmlfilename,self.folder)
-    #
-    # def load_userProfile(self):
-    #     # TODO load_userProfile - deepa
-    #     pass
-    #
-    #
-    # def save_userProfile(self, profile_summary, fileName):
-    #     # TODO save_userProfile - deepa
-    #     filename = str(fileName)
-    #
-    #     infile = open(filename, 'w')
-    #     json.dump(profile_summary, infile)
-    #     infile.close()
-    #     pass
-    #
-    # def save_CADimages(self):  # png,jpg and tiff
-    #     # TODO save_CADimages - deepa
-    #     pass
-
-    def create2Dcad(self):
-        ''' Returns the 3D model of finplate depending upon component
-        '''
-
-        final_model = None
-        cadlist = []
-        print("self.mainmodule", self.mainmodule)
-        print("self.Component", self.component)
-        print("self.connection", self.connection)
-        if self.mainmodule == "Shear Connection":
-            if self.component == "Beam":
-                final_model = self.connectivityObj.get_beamModel()
-            elif self.component == "Column":
-                final_model = self.connectivityObj.get_columnModel()
-            elif self.component == "Plate":
-                cadlist = [self.connectivityObj.weldModelLeft, self.connectivityObj.weldModelRight,
-                           self.connectivityObj.plateModel] + self.connectivityObj.nut_bolt_array.get_models()
-            elif self.component == "Weld" or self.component == "Welds":
-                # Only weld models (left and right) for separate export
-                cadlist = [self.connectivityObj.weldModelLeft, self.connectivityObj.weldModelRight]
-            elif self.component == "Bolt" or self.component == "Bolts":
-                # Only nut/bolt array models for separate export
-                cadlist = self.connectivityObj.nut_bolt_array.get_models()
-            elif self.component == "cleatAngle":
-                cadlist = [self.connectivityObj.angleModel, self.connectivityObj.angleLeftModel] + \
-                          self.connectivityObj.nut_bolt_array.get_models()
-            elif self.component == "SeatedAngle":
-                cadlist = [self.connectivityObj.topclipangleModel, self.connectivityObj.angleModel] + \
-                          self.connectivityObj.nut_bolt_array.get_models()
-            else:
-                cadlist = self.connectivityObj.get_models()
-
-        elif self.mainmodule == "Moment Connection":
-            if self.connection == KEY_DISP_BEAMCOVERPLATE or self.connection == KEY_DISP_BEAMCOVERPLATEWELD:
-                B = self.module_class
-                if self.component == "Beam":
-                    if self.connection == KEY_DISP_BEAMCOVERPLATE:
-                        final_model = self.CPObj.get_only_beams_Models()
-                    else:
-                        final_model = self.CPObj.get_beam_models()
-                elif self.component == "Connector":
-                    if self.connection == KEY_DISP_BEAMCOVERPLATE:
-                        cadlist = [self.CPObj.get_flangewebplatesModel(), self.CPObj.get_nut_bolt_arrayModels()]
-                        if B.preference != 'Outside':
-                            cadlist.insert(1, self.CPObj.get_innetplatesModels())
-                    else:
-                        cadlist = [self.CPObj.get_plate_models(), self.CPObj.get_welded_modules()]
-                else:
-                    cadlist = self.CPObj.get_models()
-
-            elif self.connection == KEY_DISP_BB_EP_SPLICE:
-
-                if self.component == "Beam":
-                    final_model = self.CPObj.get_beam_models()
-
-                elif self.component == "Connector":
-
-                    final_model = self.CPObj.get_connector_models()
-
-                else:
-                    final_model = self.CPObj.get_models()
-
-            elif self.connection == KEY_DISP_BCENDPLATE:
-
-                # self.ExtObj = self.create_extended_both_ways()
-                if self.component == "Column":
-                    final_model = self.CPObj.get_column_models()
-
-                elif self.component == "Beam":
-                    final_model = self.CPObj.get_beam_models()
-
-                elif self.component == "Connector":
-                    final_model = self.CPObj.get_connector_models()
-
-                else:
-                    final_model = self.CPObj.get_models()
-
-
-            elif self.connection == KEY_DISP_COLUMNCOVERPLATE or self.connection == KEY_DISP_COLUMNCOVERPLATEWELD:
-                if self.component == "Column":
-                    if self.connection == KEY_DISP_COLUMNCOVERPLATE:
-                        final_model = self.CPObj.get_only_column_models()
-                    else:
-                        final_model = self.CPObj.get_column_models()
-                elif self.component == "Cover Plate":
-                    if self.connection == KEY_DISP_COLUMNCOVERPLATE:
-                        cadlist = [self.CPObj.get_plate_models(), self.CPObj.get_nut_bolt_models()]
-                    else:
-                        cadlist = [self.CPObj.get_plate_models(), self.CPObj.get_welded_modules()]
-                else:
-                    cadlist = self.CPObj.get_models()
-
-            elif self.connection == KEY_DISP_COLUMNENDPLATE:
-                if self.component == "Column":
-                    final_model = self.CEPObj.get_column_models()
-                elif self.component == "Connector":
-                    plates = self.CEPObj.get_plate_models()
-                    welds = self.CEPObj.get_weld_models()
-                    nutBolts = self.CEPObj.get_nut_bolt_models()
-                    cadlist = [plates, welds, nutBolts]
-                else:
-                    final_model = self.CEPObj.get_models()
-
-            elif self.connection == KEY_DISP_BASE_PLATE:
-                if self.component == "Column":
-                    final_model = self.BPObj.get_column_model()
-                elif self.component == "Connector":
-                    plate = self.BPObj.get_plate_connector_models()
-                    weld = self.BPObj.get_welded_models()
-                    nut_bolt = self.BPObj.get_nut_bolt_array_models()
-                    cadlist = [plate, weld, nut_bolt]
-                else:
-                    final_model = self.BPObj.get_models()
-
-        elif self.mainmodule == "Member":
-            print("Main module is Member", self.connection)
-            if self.connection == KEY_DISP_TENSION_BOLTED or self.connection == KEY_DISP_TENSION_WELDED:
-                print("Connection is ", self.connection)
-                if self.component == "Member":
-                    final_model = self.TObj.get_members_models()
-                elif self.component == "Plate":
-                    if self.connection == KEY_DISP_TENSION_BOLTED:
-                        cadlist = [self.TObj.get_plates_models(), self.TObj.get_nut_bolt_array_models()]
-                    else:
-                        cadlist = [self.TObj.get_plates_models(), self.TObj.get_welded_models()]
-                elif self.component == "Endplate":
-                    if self.connection == KEY_DISP_TENSION_BOLTED:
-                        final_model = self.TObj.get_end_plates_models()
-                    else:
-                        # For welded connections, combine endplate with welds
-                        cadlist = [self.TObj.get_end_plates_models(), self.TObj.get_welded_models()]
-                elif self.component == "Model":
-                    final_model = self.TObj.get_models()
-                else:
-                    print("self.TObj: ", self.TObj.shape)   
-                    final_model = self.TObj.shape
-                    # cadlist = self.TObj.get_models() #TODO: get_models() in BoltedCAD.py and WeldedCAD.py is not returning anything right now.        # Handle case where cadlist might be a single CAD object instead of a list
-        if cadlist:
-            # Check if cadlist is actually a list (has len method)
-            try:
-                if len(cadlist) > 1:
-                    final_model = cadlist[0]
-                    for model in cadlist[1:]:
-                        final_model = BRepAlgoAPI_Fuse(model, final_model).Shape()
-                elif len(cadlist) == 1:
-                    final_model = cadlist[0]
-            except TypeError:
-                # cadlist is not a list, it's a single CAD object
-                final_model = cadlist
-
-        return final_model
-
-        # if self.component == "Beam":
-        #     # final_model = self.connectivityObj.get_beamModel()
-        #     final_model = Obj.get_beamModel()
-        #
-        # elif self.component == "Column":
-        #     # final_model = self.connectivityObj.columnModel
-        #     final_model = Obj.columnModel
-        #
-        # elif self.component == "Plate":
-        #     # cadlist = [self.connectivityObj.weldModelLeft,
-        #     #            self.connectivityObj.weldModelRight,
-        #     #            self.connectivityObj.plateModel] + self.connectivityObj.nut_bolt_array.get_models()
-        #     cadlist = [Obj.weldModelLeft,
-        #                Obj.weldModelRight,
-        #                Obj.plateModel] + Obj.nut_bolt_array.get_models()
-        #     final_model = cadlist[0]
-        #     for model in cadlist[1:]:
-        #         final_model = BRepAlgoAPI_Fuse(model, final_model).Shape()
-        # else:
-        #     # cadlist = self.connectivityObj.get_models()
-        #     cadlist = Obj.get_models()
-        #     if self.connection == KEY_DISP_BASE_PLATE:
-        #         return cadlist
-        #     final_model = cadlist[0]
-        #     for model in cadlist[1:]:
-        #         final_model = BRepAlgoAPI_Fuse(model, final_model).Shape()
-
-# if __name__!= "__main__":
-#
-#     CommonDesignLogic()
+            min_leg_length_outer = min_leg_length
+            max_leg_length_outer = max_leg_length
+
+        # print(min_leg_length,max_leg_length)
+        if operator.le(max(leg_a_length,leg_b_length),max_leg_length_outer) and operator.ge(min(leg_a_length,leg_b_length), min_leg_length_outer) and leg_a_length==leg_b_length:
+            # print("appended", designation)
+            available_angles.append(designation)
+    return available_angles
+
+
+def get_leg_lengths(designation):
+
+    """
+        Function to fetch designation values from respective Tables.
+    """
+    conn = sqlite3.connect(PATH_TO_DATABASE)
+    db_query = "SELECT a, b, t, R1 FROM Angles WHERE Designation = ?"
+    cur = conn.cursor()
+    cur.execute(db_query, (designation,))
+    row = cur.fetchone()
+
+    a = row[0]
+    b = row[1]
+    t = row[2]
+    r_r = row[3]
+    # axb = axb.lower()
+    leg_a_length = float(a)
+    leg_b_length = float(b)
+    conn.close()
+    return leg_a_length,leg_b_length,t,r_r
+
+try:
+  all_angles = connectdb("Angles","popup")
+except Exception as e:
+    print(f"Warning: Could not load Angles from database: {e}")
+    all_angles = []
+
+VALUES_CLEAT_CUSTOMIZED = get_available_cleat_list(all_angles, 200.0, 50.0)
+# print(all_angles)
+# print("customised")
+# print(VALUES_CLEAT_CUSTOMIZED)
+
+BOLT_DESCRIPTION = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+                "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+                "p, li { white-space: pre-wrap; }\n"
+                "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+                "<table border=\"0\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px;\" cellspacing=\"2\" cellpadding=\"0\">\n"
+                "<tr>\n"
+                "<td colspan=\"3\">\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">IS 800 Table 20 Typical Average Values for Coefficient of Friction (</span><span style=\" font-family:\'Calibri,sans-serif\'; font-size:9pt;\">µ</span><span style=\" font-family:\'Calibri,sans-serif\'; font-size:9pt; vertical-align:sub;\">f</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">)</span></p></td></tr></table>\n"
+                "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p>\n"
+                "<table border=\"0\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px;\" cellspacing=\"2\" cellpadding=\"0\">\n"
+                "<tr>\n"
+                "<td width=\"26\"></td>\n"
+                "<td width=\"383\">\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Treatment of Surfaces</span></p></td>\n"
+                "<td width=\"78\">\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  µ_f</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">i)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Surfaces not treated</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.2</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">ii)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Surfaces blasted with short or grit with any loose rust removed, no pitting</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.5</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">iii)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Surfaces blasted with short or grit and hot-dip galvanized</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.1</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">iv)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Surfaces blasted with short or grit and spray - metallized with zinc (thickness 50-70 µm)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.25</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">v)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Surfaces blasted with shot or grit and painted with ethylzinc silicate coat (thickness 30-60 µm)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.3</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">vi)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Sand blasted surface, after light rusting</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.52</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">vii)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Surfaces blasted with shot or grit and painted with ethylzinc silicate coat (thickness 60-80 µm)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.3</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">viii)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Surfaces blasted with shot or grit and painted with alcalizinc silicate coat (thickness 60-80 µm)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.3</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">ix)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Surfaces blasted with shot or grit and spray metallized with aluminium (thickness &gt;50 µm)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.5</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">x)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Clean mill scale</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.33</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">xi)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Sand blasted surface</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.48</span></p></td></tr>\n"
+                "<tr>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">xii)</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Red lead painted surface</span></p></td>\n"
+                "<td>\n"
+                "<p align=\"justify\" style=\" margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">  0.1</span></p>\n"
+                "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></td></tr></table></body></html>")
+
+WELD_DESCRIPTION = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+               "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+               "p, li { white-space: pre-wrap; }\n"
+               "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Shop weld takes a material safety factor of 1.25</span></p>\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Field weld takes a material safety factor of 1.5</span></p>\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">(IS 800 - cl. 5. 4. 1 or Table 5)</span></p></body></html>")
+
+# DETAILING_DESCRIPTION = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+#                "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+#                "p, li { white-space: pre-wrap; }\n"
+#                "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+#                "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The minimum edge and end distances from the centre of any hole to the nearest edge of a plate shall not be less than </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">1.7</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> times the hole diameter in case of </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">[sheared or hand flame cut edges] </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">and </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">1.5 </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">times the hole diameter in case of </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">[Rolled, machine-flame cut, sawn and planed edges]</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> (IS 800 - cl. 10. 2. 4. 2)</span></p>\n"
+#                "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt; vertical-align:middle;\"><br /></p>\n"
+#                "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">This gap should include the tolerance value of 5mm. So if the assumed clearance is 5mm, then the gap should be = 10mm (= 5mm {clearance} + 5 mm{tolerance})</span></p>\n"
+#                "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n"
+#                "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Specifying whether the members are exposed to corrosive influences, here, only affects the calculation of the maximum edge distance as per cl. 10.2.4.3</span></p>\n"
+#                "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+
+
+DETAILING_DESCRIPTION = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+               "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+               "p, li { white-space: pre-wrap; }\n"
+               "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The minimum edge and end distances from the centre of any hole to the nearest edge of a plate shall not be less than </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">1.7</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> times the hole diameter in case of </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">[sheared or hand flame cut edges] </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">and </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">1.5 </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">times the hole diameter in case of </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">[Rolled, machine-flame cut, sawn and planed edges]</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> (IS 800 - cl. 10. 2. 4. 2)</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt; vertical-align:middle;\"><br /></p>\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">This gap should include the tolerance value of 5mm or 1.5mm. So if the assumed clearance is 5mm, then the gap should be = 10mm (= 5mm {clearance} + 5mm {tolerance} or if the assumed clearance is 1.5mm, then the gap should be = 3mm (= 1.5mm {clearance} + 1.5mm {tolerance}. These are the default gap values based on the site practice for convenience of erection and IS 7215,Clause 2.3.1. The gap value can also be zero based on the nature of connection where clearance is not required.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">Specifying whether the members are exposed to corrosive influences, here, only affects the calculation of the maximum edge distance as per cl. 10.2.4.3</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+DETAILING_DESCRIPTION_LAPJOINT = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+               "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+               "p, li { white-space: pre-wrap; }\n"
+               "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The minimum edge and end distances from the centre of any hole to the nearest edge of a plate shall not be less than </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">1.7</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> times the hole diameter in case of </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">[sheared or hand flame cut edges] </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">and </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">1.5 </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">times the hole diameter in case of </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">[Rolled, machine-flame cut, sawn and planed edges]</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> (IS 800 - cl. 10. 2. 4. 2)</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt; vertical-align:middle;\"><br /></p>\n</body></html>")
+
+
+COLUMN_OPTIMIZATION_DESCRIPTION = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+               "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+               "p, li { white-space: pre-wrap; }\n"
+               "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Allowable Utilization Ratio (UR)</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the maximum allowable value of the demand to capacity ratio for performing the design. The default value of this ratio is set at </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">1.0</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">. The UR can be re-defined for any particular design session with a maximum allowable value of 1.0 and a minimum of 0.1.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt; vertical-align:middle;\"><br /></p>\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Optimization Parameter</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the parameter used for selecting the most optimum section as the design output. The default parameter is set as the </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Utilization Ratio (UR)</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">. Optimum sections can be selected based on the cost plus UR by choosing the '</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Cost</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">' parameter from the drop-down list.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Effective Area Parameter</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the parameter used to define the reduction in the area of the section due to connection detailing and other such requirements. The default value of this parameter is set at 1.0, which means that the effective area is 100% of the gross area for Plastic, Compact and Semi-compact sections. For Slender sections, the initial area will be computed based on the recommendations in Fig.2B of The National Building Code (2016). The value of the parameter should be defined in terms of the effective area to be considered for design simulation after deducting the area lost. The maximum value of the parameter is 1.0 (effective area is 100% of the gross area) with a minimum value of 0.1.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Section Definition</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> preference allows to choose the type of section to be considered in the design as per the classification listed in Table 2 (Cl.3.7.2 and Cl.3.7.4) of IS 800:2007. Choosing 'Yes' for a particular section type will allow the solver to choose that section when it performs the design checks. Choosing 'No' will simply discard the section from the list of sections as a possible output.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+Optimum_Para = str("<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Optimization Parameter</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the parameter used for selecting the most optimum section as the design output. The default parameter is set as the </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Utilization Ratio (UR)</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">. Optimum sections can be selected based on the cost plus UR by choosing the '</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Cost</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">' parameter from the drop-down list.</span></p>\n"
+                    "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt; vertical-align:middle;\"><br /></p>\n"
+                   )
+
+Allowable_Utilization_Para = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Allowable Utilization Ratio (UR)</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the maximum allowable value of the demand to capacity ratio for performing the design. The default value of this ratio is set at </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">1.0</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">. The UR can be re-defined for any particular design session with a maximum allowable value of 1.0 and a minimum of 0.1.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n")
+
+Effective_Area_Para = str("<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Effective Area Parameter</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the parameter used to define the reduction in the area of the section due to connection detailing and other such requirements. The default value of this parameter is set at 1.0, which means that the effective area is 100% of the gross area for Plastic, Compact and Semi-compact sections. For Slender sections, the initial area will be computed based on the recommendations in Fig.2B of The National Building Code (2016). The value of the parameter should be defined in terms of the effective area to be considered for design simulation after deducting the area lost. The maximum value of the parameter is 1.0 (effective area is 100% of the gross area) with a minimum value of 0.1.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n")
+
+
+Type_Load_Para = str("<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Type of Load</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the parameter used to define how the load maybe transferred in a Single Angle section. By default the Section will transfer the load concentrically through end gusset represented by </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Concentric Load</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">. Type of Load can be selected based on the Concentric Load plus Leg Load by choosing the '</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Leg Load</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">' parameter from the drop-down list. </span></p>\n"                          
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n")
+
+Section_Definition_Para = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                               "The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                               "Section Definition</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                               "preference allows to choose the type of section to be considered in the design as per the classification listed in Table 2 (Cl.3.7.2 and Cl.3.7.4) of IS 800:2007. Choosing 'Yes' for a particular section type will allow the solver to choose that section when it performs the design checks. Choosing 'No' will simply discard the section from the list of sections as a possible output.</span></p>\n"
+                                "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+Single_Angle_Out_Plane = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                              "In the case of members of trusses, buckling in the plane perpendicular to the plane of the truss, </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                              "Out of Plane</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                              ", the effective length, KL shall be taken as the distance between the centres of intersection (Cl.7.2.4) of IS 800:2007.</span></p>\n"
+"<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>"
+                              )
+Single_Angle_In_Plane = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                              "In the case of members of trusses, buckling in the plane of the truss, </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                              "In Plane</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                              ", the effective length, KL shall be taken as 0.7 to 1.0 times the distance between the centres of connections, depending on the degree of end restraint provided (Cl.7.2.4) of IS 800:2007.</span></p>\n"
+                              "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+Double_angle_opposite_gusset = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                                    "</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                                    "Double Angle Struts connected back to back, on opposite sides of the gusset</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                                    "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+Double_angle_same_gusset = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                                "</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                                "Double Angle Struts connected back to back on one side of a gusset or section</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                                "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+Opposite_Side_of_Gusset_Out_Plane = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                              "The effective length, KL, in the plane perpendicular to that of the end gusset,, </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                              "Out of Plane</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                              ",shall be taken as equal to the distance between centres of intersections (Cl.7.5.2.1) of IS 800:2007.</span></p>\n"
+                              "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+Opposite_Side_of_Gusset_In_Plane = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                              "The effective length, KL, in the plane of end gusset, </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                              "In Plane</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                              ", shall be taken as between 0.7 and 0.85 times the distance between intersections, depending on the degree of the restraint provided  (Cl.7.5.2.1) of IS 800:2007.</span></p>\n"
+                              "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+Same_Side_of_Gusset_Out_Plane = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                              "The effective length, KL, in the plane perpendicular to that of the end gusset,, </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                              "Out of Plane</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                              ",shall be taken as equal to the distance between centres of intersections (Cl.7.5.2.1) of IS 800:2007.</span></p>\n"
+                              "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+Same_Side_of_Gusset_In_Plane = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">"
+                              "The effective length, KL, in the plane of end gusset, </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">"
+                              "In Plane</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> "
+                              ", shall be taken as between 0.7 and 0.85 times the distance between intersections, depending on the degree of the restraint provided  (Cl.7.5.2.1) of IS 800:2007.</span></p>\n"
+                              "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"><br /></p></body></html>")
+
+
+STRUT_OPTIMIZATION_DESCRIPTION = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+               "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+               "p, li { white-space: pre-wrap; }\n"
+               "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+               ) + Allowable_Utilization_Para + Effective_Area_Para
+Effective_Length_Para = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Effective Length</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the parameter to </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Overwrite</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> the Length multiplyer. The default value of this ratio is set at </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">NA</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">. The value can be re-defined for any particular design session with a minimum of 0.1. If invalid value given then it is set to NA or 1.0.</span></p>\n"
+               "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">For simply supported beams of overall depth D and span length L, the effective length L<sub>LT</sub> is given by below Table</span></p>\n"             
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n")
+Bearing_Length_Para = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Bearing Length Parameter</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is the length of Bearing stiffener provided for webs. The default value of this parameter is set at </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">NA</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">. If invalid value given then it is set to NA.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n")
+Shear_Buckling_Para = str( "<p align=\"justify\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">The </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Shear Buckling</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\"> is only applicable when the input sections are susceptible to shear buckling.. The default value of this parameter is set at </span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Simple Post Critical Method</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">. Refer</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt; font-weight:600;\">Clause IS 8.4.2.2</span><span style=\" font-family:\'MS Shell Dlg 2\'; font-size:8pt;\">for understanding which method is applicable in your case.</span></p>\n"
+               "<p align=\"justify\" style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; font-family:\'Calibri\'; font-size:8pt;\"><br /></p>\n")
+
+OPTIMIZATION_TABLE_UI = str("""
+<div style="width:100%;" style="overflow-x:auto;">
+    <table style="width:100%;" border="1">
+      <tr>
+      <th colspan="5" style="text-align:center;">Effective Length for Cantilever Beams </th>
+    </tr>
+    <tr>
+        <th>Sl No.</th>
+        <th colspan="2" style="text-align:center;">Conditions of Restraint</th>
+        <th colspan="2" style="text-align:center;">Loading Condition</th>
+      </tr>
+      <tr >
+        <th> </th>
+        <th>Support</th>
+        <th>Top</th>
+        <th>Normal</th>
+        <th>Destabilizing</th>
+      </tr>
+      <tr style="text-align:center;">
+        <td rowspan="4">(i)</td>
+        <td rowspan="4">Continous, with lateral restraint to top flange</td>
+        <td>Free</td>
+        <td>3.0 L</td>
+        <td>7.5 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Lateral restraint to top flange</td>
+        <td>2.7 L</td>
+        <td>7.5 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Torsional restraint</td>
+        <td>2.4 L</td>
+        <td>4.5 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Lateral and Torsional restraint</td>
+        <td>2.1 L</td>
+        <td>3.6 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td rowspan="4">(ii)</td>
+        <td rowspan="4">Continous, with partial torsional restraint</td>
+        <td>Free</td>
+        <td>2.0 L</td>
+        <td>5.0 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Lateral restraint to top flange</td>
+        <td>1.8 L</td>
+        <td>5.0 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Torsional restraint</td>
+        <td>1.6 L</td>
+        <td>3.0 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Lateral and Torsional restraint</td>
+        <td>1.4 L</td>
+        <td>2.4 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td rowspan="4">(iii)</td>
+        <td rowspan="4">Continous, with lateral and torsional restraint</td>
+        <td>Free</td>
+        <td>1.0 L</td>
+        <td>2.5 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Lateral restraint to top flange</td>
+        <td>0.9 L</td>
+        <td>2.5 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Torsional restraint</td>
+        <td>0.8 L</td>
+        <td>1.5 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Lateral and Torsional restraint</td>
+        <td>0.7 L</td>
+        <td>1.2 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td rowspan="4">(iv)</td>
+        <td rowspan="4">Restrained laterally, torsionally and against rotation</td>
+        <td>Free</td>
+        <td>0.8 L</td>
+        <td>1.4 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Lateral restraint to top flange</td>
+        <td>0.7 L</td>
+        <td>1.4 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Torsional restraint</td>
+        <td>0.6 L</td>
+        <td>0.6 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>Lateral and Torsional restraint</td>
+        <td>0.5 L</td>
+        <td>0.5 L</td>
+      </tr>
+        <!-- Add more rows as needed -->
+</table>
+</div>
+</body></html>
+""")
+
+STRUT_OPTIMIZATION_DESCRIPTION = (
+    '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">\n'
+    '<html><head><meta name="qrichtext" content="1" /><style type="text/css">\n'
+    'p, li { white-space: pre-wrap; }\n'
+    '</style></head><body style="font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;">\n'
+) + Allowable_Utilization_Para + Effective_Area_Para # + OPTIMIZATION_TABLE_UI
+
+OPTIMIZATION_TABLE_UI2 = str("""
+<div style="width:100%;" style="overflow-x:auto;">
+    <table style="width:100%;" border="1">
+      <tr>
+        <th colspan="5" style="text-align:center;">Effective Length for Simply Supported Beams </th>
+    </tr>
+    <tr>
+        <th>Sl No.</th>
+        <th colspan="2" style="text-align:center;">Conditions of Restraint Supports</th>
+        <th colspan="2" style="text-align:center;">Loading Condition</th>
+      </tr>
+      <tr style="text-align:center;">
+        <th> </th>
+        <th>Torsional Restraint</th>
+        <th>Warping Restraint</th>
+        <th>Normal</th>
+        <th>Destabilizing</th>
+      </tr>
+      <tr style="text-align:center;">
+        <td>(i)</td>
+        <td>Fully restrained</td>
+        <td>Both flanges fully restrained</td>
+        <td>0.7 L</td>
+        <td>0.85 L</td>
+      </tr>
+      <tr style="text-align:center;">
+        <td>(ii)</td>
+        <td>Fully restrained</td>
+        <td>Compression flange fully restrained</td>
+        <td>0.75 L</td>
+        <td>0.9 L</td>        
+      </tr>
+      <tr style="text-align:center;">
+        <td>(iii)</td>
+        <td>Fully restrained</td>
+        <td>Both flanges fully restrained</td>
+        <td>0.8 L</td>
+        <td>0.95 L</td>  
+      </tr>
+      <tr style="text-align:center;">
+        <td>(iv)</td>
+        <td>Fully restrained</td>
+        <td>Both flanges fully restrained</td>
+        <td>0.85 L</td>
+        <td>1.0 L</td>  
+      </tr>
+      <tr style="text-align:center;">
+        <td>(v)</td>
+        <td>Fully restrained</td>
+        <td>Warping not restrained in both flanges</td>
+        <td>1.0 L</td>
+        <td>1.2 L</td>  
+      </tr>
+      <tr style="text-align:center;">
+        <td>(vi)</td>
+        <td>Partially restrained by bottom flange support connection</td>
+        <td>Warping not restrained in both flanges</td>
+        <td>1.0 + 2 D</td>
+        <td>1.2 L + 2 D</td>  
+      </tr>
+      <tr style="text-align:center;">
+        <td>(vii)</td>
+        <td>Partially restrained by bottom flange bearing support</td>
+        <td>Warping not restrained in both flanges</td>
+        <td>1.2 L + 2 D</td>
+        <td>1.4 L + 2 D</td>  
+      </tr>
+        <!-- Add more rows as needed -->
+</table>
+</div>
+""")+str("<p>\n</p>")
+# </body></html>
+FLEXURE_OPTIMIZATION_DESCRIPTION_SimplySupp = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+               "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+               "p, li { white-space: pre-wrap; }\n"
+               "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+               ) + Allowable_Utilization_Para + Effective_Area_Para + Effective_Length_Para + OPTIMIZATION_TABLE_UI2 + Bearing_Length_Para
+
+FLEXURE_OPTIMIZATION_DESCRIPTION_Canti = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+               "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+               "p, li { white-space: pre-wrap; }\n"
+               "</style></head><body style=\" font-family:\'Arial\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+               ) + Allowable_Utilization_Para + Effective_Area_Para + Effective_Length_Para + OPTIMIZATION_TABLE_UI + Bearing_Length_Para
+
+PLATE_GIRDER_DEFLECTION_TABLE = str("""
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Clause 5.6.1 Deflection</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 30px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 5px;
+    }
+    h2 {
+      text-align: center;
+      margin-top: 0;
+      margin-bottom: 20px;
+    }
+    table {
+      border-collapse: collapse;
+      margin: 0 auto;
+      padding: 10px;
+      width: auto;
+    }
+    table th, table td {
+      border: 1px solid #444;
+      padding: 8px 12px;
+      text-align: center;
+    }
+    table th {
+      background-color: #f2f2f2;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Clause 5.6.1 Deflection</h1>
+  <h2>Vertical Deflection - Table 6 of IS800-2007</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Type of structure</th>
+        <th>Load Type</th>
+        <th>Member</th>
+        <th>Supporting</th>
+        <th>Deflection Limit</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Industrial building</td><td>Live Load</td><td>Purlins and Girts</td><td>Elastic cladding</td><td>Span/150</td></tr>
+      <tr><td>Industrial building</td><td>Live Load</td><td>Purlins and Girts</td><td>Brittle cladding</td><td>Span/180</td></tr>
+      <tr><td>Industrial building</td><td>Live Load</td><td>Simple span</td><td>Elastic cladding</td><td>Span/240</td></tr>
+      <tr><td>Industrial building</td><td>Live Load</td><td>Simple span</td><td>Brittle cladding</td><td>Span/300</td></tr>
+      <tr><td>Industrial building</td><td>Live Load</td><td>Cantilever span</td><td>Elastic cladding</td><td>Span/120</td></tr>
+      <tr><td>Industrial building</td><td>Live Load</td><td>Cantilever span</td><td>Brittle cladding</td><td>Span/150</td></tr>
+      <tr><td>Industrial building</td><td>Live Load</td><td>Rafter supporting</td><td>Profiled Metal Sheeting</td><td>Span/180</td></tr>
+      <tr><td>Industrial building</td><td>Live Load</td><td>Rafter supporting</td><td>Plastered Sheeting</td><td>Span/240</td></tr>
+      <tr><td>Industrial building</td><td>Crane Load(Manual operation)</td><td>Gantry</td><td>Crane</td><td>Span/500</td></tr>
+      <tr><td>Industrial building</td><td>Crane load(Electric operation up to 50t)</td><td>Gantry</td><td>Crane</td><td>Span/750</td></tr>
+      <tr><td>Industrial building</td><td>Crane load(Electric operation over 50t)</td><td>Gantry</td><td>Crane</td><td>Span/1000</td></tr>
+      <tr><td>Other buildings</td><td>Live Load</td><td>Floor and Roof</td><td>Elements not susceptible to cracking</td><td>Span/300</td></tr>
+      <tr><td>Other buildings</td><td>Live Load</td><td>Floor and Roof</td><td>Element susceptible to cracking</td><td>Span/360</td></tr>
+      <tr><td>Other buildings</td><td>Live Load</td><td>Cantilever Span</td><td>Elements not susceptible to cracking</td><td>Span/150</td></tr>
+      <tr><td>Other buildings</td><td>Live Load</td><td>Cantilever Span</td><td>Element susceptible to cracking</td><td>Span/180</td></tr>
+      <tr><td>Highway Bridges</td><td>Live Load</td><td>Simple span</td><td>NA</td><td>Span/600</td></tr>
+      <tr><td>Railway Bridges</td><td>Live Load</td><td>Simple span</td><td>NA</td><td>Span/600</td></tr>
+      <tr><td>Highway Bridges</td><td>Dead Load</td><td>Simple span</td><td>NA</td><td>Span/800</td></tr>
+      <tr><td>Railway Bridges</td><td>Dead Load</td><td>Simple span</td><td>NA</td><td>Span/800</td></tr>
+      <tr><td>Highway Bridges</td><td>Live Load</td><td>Cantilever span</td><td>NA</td><td>Span/400</td></tr>
+      <tr><td>Railway Bridges</td><td>Live Load</td><td>Cantilever span</td><td>NA</td><td>Span/400</td></tr>
+      <tr><td>Highway Bridges</td><td>Dead Load</td><td>Cantilever span</td><td>NA</td><td>Span/800</td></tr>
+      <tr><td>Railway Bridges</td><td>Dead Load</td><td>Cantilever span</td><td>NA</td><td>Span/800</td></tr>
+    </tbody>
+  </table>
+
+</body>
+</html>
+
+
+
+""")

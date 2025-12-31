@@ -8,9 +8,18 @@ import operator
 import math
 import logging
 from importlib.resources import files
+import os
 
 PATH_TO_DATABASE = files("osdag_core.data.ResourceFiles.Database").joinpath("Intg_osdag.sqlite")
-PDFLATEX = files("osdag_core.data.ResourceFiles.osdag-latex-env.bin.windows").joinpath("pdflatex.exe")
+
+# PDFLATEX path - handle gracefully if the package structure doesn't exist
+try:
+    # Note: osdag-latex-env may not be a valid package name due to hyphens
+    # Fallback to system pdflatex if this fails
+    PDFLATEX = files("osdag_core.data.ResourceFiles.osdag-latex-env.bin.windows").joinpath("pdflatex.exe")
+except (ModuleNotFoundError, TypeError, AttributeError):
+    # Fallback to system pdflatex
+    PDFLATEX = "pdflatex"
 
 import sqlite3
 
@@ -496,6 +505,7 @@ KEY_DISP_DESIGN_STRENGTH_SHEAR_ZZ = 'Shear Strength (z-z) (kN)'
 KEY_DISP_DESIGN_STRENGTH_MOMENT = 'Moment Strength (kNm)' # Design
 KEY_DISP_DESIGN_STRENGTH_MOMENT_YY = 'Moment Strength (y-y) (kNm)'
 KEY_DISP_DESIGN_STRENGTH_MOMENT_ZZ = 'Moment Strength (z-z) (kNm)'
+KEY_DISP_DESIGN_BENDING_STRENGTH = 'Design Bending Strength (kNm)'
 KEY_DISP_REDUCE_STRENGTH_MOMENT = 'Reduced Moment Strength (kNm)'
 KEY_EULER_BUCKLING_STRESS = 'MajorBucklingStress'
 KEY_DISP_EULER_BUCKLING_STRESS = 'Buckling Stress (MPa)' # Euler 
@@ -747,6 +757,16 @@ KEY_DISP_LongitudnalStiffener = 'Longitudnal Stiffener'
 KEY_DISP_LongitudnalStiffener_thickness = 'Longitudnal Stiffener Thickness'
 KEY_IntermediateStiffener_thickness = 'IntermediateStiffener.Thickness'
 KEY_DISP_IntermediateStiffener_thickness = 'Intermediate Stiffener Thickness'
+KEY_IntermediateStiffener_thickness_val = 'IntermediateStiffener.Thickness.Val'
+KEY_LongitudnalStiffener_thickness_val = 'LongitudnalStiffener.Thickness.Val'
+KEY_LongitudnalStiffener_numbers = 'LongitudnalStiffener.Numbers'
+KEY_DISP_LongitudnalStiffener_numbers = 'Longitudnal Stiffener Numbers'
+KEY_EndpanelStiffener_thickness = 'EndpanelStiffener.Thickness'
+KEY_DISP_EndpanelStiffener_thickness = 'Endpanel Stiffener Thickness'
+KEY_LongitudinalStiffener1_pos = 'LongitudinalStiffener1.Position'
+KEY_DISP_LongitudinalStiffener1_pos = 'Longitudinal Stiffener 1 Position'
+KEY_LongitudinalStiffener2_pos = 'LongitudinalStiffener2.Position'
+KEY_DISP_LongitudinalStiffener2_pos = 'Longitudinal Stiffener 2 Position'
 KEY_WeldWebtoflange= 'WeldWebtoflange.Data'
 KEY_DISP_WeldWebtoflange= 'Weld for Web to Flange'
 KEY_WeldStiffenertoweb= 'WeldStiffenertoweb.Data'

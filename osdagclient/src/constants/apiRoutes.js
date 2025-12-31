@@ -25,6 +25,7 @@ import {
   MODULE_KEY_BOLTED_TO_END_GUSSET,
   MODULE_KEY_WELDED_TO_END_GUSSET,
   MODULE_KEY_SIMPLY_SUPPORTED_BEAM,
+  MODULE_KEY_PLATE_GIRDER,
 } from "./DesignKeys";
 
 // Centralized API route mappings for engineering modules.
@@ -60,6 +61,7 @@ export const MODULE_SLUGS = {
   [MODULE_KEY_WELDED_TO_END_GUSSET]: 'tension-member/welded',
   // Flexure
   [MODULE_KEY_SIMPLY_SUPPORTED_BEAM]: 'flexure-member/simply-supported-beam',
+  [MODULE_KEY_PLATE_GIRDER]: 'flexure-member/plate-girder',
 };
 
 export const getModuleSlug = (moduleId) => MODULE_SLUGS[moduleId] || moduleId;
