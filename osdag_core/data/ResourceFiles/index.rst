@@ -26,13 +26,13 @@ Osdag Homepage_.
 ***********************
 1.1. Shear Connection
 #######################
-1.1.1. FinPlateConnection
+1.1.1. Fin Plate Connection
 ****************************
 1.1.1.1 Column Flange-Beam Web (CFBW) connectivity
 
     	*Sample problem 1*
 
-		Design a finPlateConnection between a beam MB 500 and a column UC 305 x 305 x 97 for transferring a vertical (factored) shear force of 140 kN. Use M24 Friction grip bolts of property class 8.8. Try 12mm thick fin plate with weld thickness of 12mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume bolt hole type as standard, weld type as shop weld and type of edge as hand flame cut.
+		Design a fin plate connection between a beam MB 500 and a column UC 305 x 305 x 97 for transferring a vertical (factored) shear force of 140 kN. Use M24 Friction grip bolts of property class 8.8. Try 12mm thick fin plate with weld thickness of 12mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume bolt hole type as standard, weld type as shop weld and type of edge as hand flame cut.
 
    	 **Download:**
 
@@ -42,7 +42,7 @@ Osdag Homepage_.
  
     	*Sample problem 2*
 
-		Design a finPlateConnection between a beam MB 350 and a column SC 200 for transferring a vertical (factored) shear force of 150 kN. Use M20 bearing bolts of property class 4.6. Try 12mm thick fin plate with weld thickness of 8mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume weld type as shop weld and type of edge as machine flame cut.
+		Design a fin plate connection between a beam MB 350 and a column SC 200 for transferring a vertical (factored) shear force of 150 kN. Use M20 bearing bolts of property class 4.6. Try 12mm thick fin plate with weld thickness of 8mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume weld type as shop weld and type of edge as machine flame cut.
 
    	 **Download:**
 
@@ -54,7 +54,7 @@ Osdag Homepage_.
 
     	*Sample problem 1*
 
-		Design a finPlateConnection between a beam UB 356 x 171 x 45 and a column PBP 300 x 180 for transferring a vertical (factored) shear force of 120 kN. Use M16 Friction grip bolts of property class 8.8. Try 8mm thick fin plate with weld thickness of 8mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume bolt hole type as standard, slip factor of 0.25, type of weld as field weld and edge as hand flame cut.
+		Design a fin plate connection between a beam UB 356 x 171 x 45 and a column PBP 300 x 180 for transferring a vertical (factored) shear force of 120 kN. Use M16 Friction grip bolts of property class 8.8. Try 8mm thick fin plate with weld thickness of 8mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume bolt hole type as standard, slip factor of 0.25, type of weld as field weld and edge as hand flame cut.
 
     	**Download:**
 
@@ -64,7 +64,7 @@ Osdag Homepage_.
 
     	*Sample problem 2*
 
-		Design a finPlateConnection between a beam LB 300 and a column SC 250 for transferring a vertical (factored) shear force of 135 kN. Use M24 bearing bolts of property class 4.8. Try 10mm thick fin plate with weld thickness of 8mm. Take Fe410 grade steel f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume bolt hole type as standard, type of weld as shop weld and edge as hand flame cut and environment as corrosive.
+		Design a fin plate connection between a beam LB 300 and a column SC 250 for transferring a vertical (factored) shear force of 135 kN. Use M24 bearing bolts of property class 4.8. Try 10mm thick fin plate with weld thickness of 8mm. Take Fe410 grade steel f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume bolt hole type as standard, type of weld as shop weld and edge as hand flame cut and environment as corrosive.
 
     	**Download:**
 
@@ -76,7 +76,7 @@ Osdag Homepage_.
 
 	*Sample problem 1*
     
-		Design a finPlateConnection between a primary beam MB 350 and a secondary beam NPB 270 x 135 x 36.1 for transferring a vertical (factored) shear force of 110 kN. Use M20 Friction grip bolts of property class 10.9. Try 10mm thick fin plate with weld thickness of 8mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume slip factor of 0.52, bolt hole type oversized and type of edge as machine flame cut.
+		Design a fin plate connection between a primary beam MB 350 and a secondary beam NPB 270 x 135 x 36.1 for transferring a vertical (factored) shear force of 110 kN. Use M20 Friction grip bolts of property class 10.9. Try 10mm thick fin plate with weld thickness of 8mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume slip factor of 0.52, bolt hole type oversized and type of edge as machine flame cut.
 
    	 **Download:**
 
@@ -86,7 +86,7 @@ Osdag Homepage_.
 
    	 *Sample problem 2*
 
-		Design a finPlateConnection between a primary beam WPB 450 x 300 x 99.7 and a secondary beam UB 356 x 171 x 67 for transferring a vertical (factored) shear force of 220 kN. Use M24 Friction grip bolts of property class 10.9. Try 14mm thick fin plate with weld thickness of 12mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume slip factor of 0.48, bolt hole type standard, weld type as shop weld and type of edge as machine flame cut.
+		Design a fin plate connection between a primary beam WPB 450 x 300 x 99.7 and a secondary beam UB 356 x 171 x 67 for transferring a vertical (factored) shear force of 220 kN. Use M24 Friction grip bolts of property class 10.9. Try 14mm thick fin plate with weld thickness of 12mm. Take Fe410 grade steel (f\ :sub:`y` \  = 250 MPa,  f\ :sub:`u` = 410 MPa). Assume slip factor of 0.48, bolt hole type standard, weld type as shop weld and type of edge as machine flame cut.
 
     	**Download:**
 

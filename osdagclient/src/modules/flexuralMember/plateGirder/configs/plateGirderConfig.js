@@ -152,33 +152,76 @@ export const plateGirderConfig = {
     );
 
     // Build base params - using exact backend key strings
+    // const params = {
+    //   "Module": "Plate-Girder",
+    //   "Material": String(inputs.material || "E 250 (Fe 410 W)A"),
+    //   "Member.Length": memberLengthM,
+    //   "Loading.Condition": String(inputs.loading_condition || "Normal"),
+    //   "Load.Shear": String(inputs.shear_force || "0"),
+    //   "Load.Moment": String(inputs.bending_moment || "0"),
+    //   "Total.Design_Type": String(inputs.design_type || "Customized"),
+    //   "Web.Thickness": webThicknessList.length > 0 ? webThicknessList : ["6"],
+    //   "TopFlange.Thickness": topFlangeThicknessList.length > 0 ? topFlangeThicknessList : ["6"],
+    //   "BottomFlange.Thickness": bottomFlangeThicknessList.length > 0 ? bottomFlangeThicknessList : ["6"],
+    //   "Design.Design_Type_Flexure": String(inputs.support_type || "Major Laterally Supported"),
+    //   "Loading.Bending_Moment_Shape": String(inputs.bending_moment_shape || "Uniform Loading with pinned-pinned support"),
+    //   "Design.Torsional_Restraint": String(inputs.torsional_restraint || "Fully Restrained"),
+    //   "Design.Warping_Restraint": String(inputs.warping_restraint || "Both flanges fully restrained"),
+    //   "Design.Max_Deflection": String(inputs.max_deflection || "L/250"),
+    //   "Design.Allow_Class": String(inputs.allowable_class || "Plastic"),
+    //   "Design.Web_Philosophy": String(inputs.web_philosophy || "Thick Web without ITS"),
+    //   "Design.Support_Width": String(inputs.support_width || "100"),
+    //   "Design.IntermediateStiffener.Spacing": String(inputs.intermediate_stiffener_spacing || "NA"),
+    //   "Design.IntermediateStiffener.Thickness": String(inputs.intermediate_stiffener_thickness || "Standard"),
+    //   "Design.LongitudnalStiffener": String(inputs.longitudinal_stiffener || "No"),
+    //   "Design.LongitudnalStiffener.Thickness": String(inputs.longitudinal_stiffener_thickness || "Standard"),
+    //   "Design.Design_Method": String(inputs.design_method || "Limit State Design"),
+    //   "Design.Effective_Area_Parameter": String(inputs.effective_area_parameter || "1.0"),
+    //   "Design.Length_Overwrite": String(inputs.length_overwrite || "NA"),
+    // };
+
     const params = {
-      "Module": "Plate-Girder",
-      "Material": String(inputs.material || "E 250 (Fe 410 W)A"),
-      "Member.Length": memberLengthM,
-      "Loading.Condition": String(inputs.loading_condition || "Normal"),
-      "Load.Shear": String(inputs.shear_force || "0"),
-      "Load.Moment": String(inputs.bending_moment || "0"),
-      "Total.Design_Type": String(inputs.design_type || "Customized"),
-      "Web.Thickness": webThicknessList.length > 0 ? webThicknessList : ["6"],
-      "TopFlange.Thickness": topFlangeThicknessList.length > 0 ? topFlangeThicknessList : ["6"],
-      "BottomFlange.Thickness": bottomFlangeThicknessList.length > 0 ? bottomFlangeThicknessList : ["6"],
-      "Design.Design_Type_Flexure": String(inputs.support_type || "Major Laterally Supported"),
-      "Loading.Bending_Moment_Shape": String(inputs.bending_moment_shape || "Uniform Loading with pinned-pinned support"),
-      "Design.Torsional_Restraint": String(inputs.torsional_restraint || "Fully Restrained"),
-      "Design.Warping_Restraint": String(inputs.warping_restraint || "Both flanges fully restrained"),
-      "Design.Max_Deflection": String(inputs.max_deflection || "L/250"),
-      "Design.Allow_Class": String(inputs.allowable_class || "Plastic"),
-      "Design.Web_Philosophy": String(inputs.web_philosophy || "Thick Web without ITS"),
-      "Design.Support_Width": String(inputs.support_width || "100"),
-      "Design.IntermediateStiffener.Spacing": String(inputs.intermediate_stiffener_spacing || "NA"),
-      "Design.IntermediateStiffener.Thickness": String(inputs.intermediate_stiffener_thickness || "Standard"),
-      "Design.LongitudnalStiffener": String(inputs.longitudinal_stiffener || "No"),
-      "Design.LongitudnalStiffener.Thickness": String(inputs.longitudinal_stiffener_thickness || "Standard"),
-      "Design.Design_Method": String(inputs.design_method || "Limit State Design"),
-      "Design.Effective_Area_Parameter": String(inputs.effective_area_parameter || "1.0"),
-      "Design.Length_Overwrite": String(inputs.length_overwrite || "NA"),
-    };
+        // --- Basic Module Info ---
+        "Module": "Plate-Girder",
+        "Material": "E 250 (Fe 410 W)A",
+        "Member.Length": "5", // 5m span
+        
+        // --- Loads ---
+        "Loading.Condition": "Normal",
+        "Load.Shear": "150",   // 150 kN
+        "Load.Moment": "500",  // 500 kNm
+        "Loading.Bending_Moment_Shape": "Uniform Loading with pinned-pinned support",
+      
+        // --- Geometry (CRITICAL FIXES) ---
+        "Total.Design_Type": "Customized",
+        "Total.Depth": "800",        // REQUIRED: Deep enough for plate girder
+        "Topflange.Width": "300",    // REQUIRED: Wide enough for stability
+        "Bottomflange.Width": "300", // REQUIRED: Symmetric
+      
+        // --- Thicknesses (Must be Arrays) ---
+        // 12mm web for Thick Web philosophy; 20mm flange to prevent Slender section
+        "Web.Thickness": ["12"],           
+        "TopFlange.Thickness": ["20"],     
+        "BottomFlange.Thickness": ["20"],  
+      
+        // --- Design Preferences ---
+        "Design.Design_Type_Flexure": "Major Laterally Supported",
+        "Design.Torsional_Restraint": "Fully Restrained",
+        "Design.Warping_Restraint": "Both flanges fully restrained",
+        "Design.Max_Deflection": "L/250",
+        "Design.Allow_Class": "Plastic",
+        "Design.Web_Philosophy": "Thick Web without ITS",
+        "Design.Support_Width": "100",
+        "Design.Design_Method": "Limit State Design",
+        "Design.Effective_Area_Parameter": "1.0",
+        "Design.Length_Overwrite": "NA",
+      
+        // --- Stiffener Settings (NA for Thick Web) ---
+        "Design.IntermediateStiffener.Spacing": "NA",
+        "Design.IntermediateStiffener.Thickness": "Standard",
+        "Design.LongitudnalStiffener": "No",
+        "Design.LongitudnalStiffener.Thickness": "Standard"
+      };
 
     // Add design type specific params
     if (inputs.design_type === "Customized") {

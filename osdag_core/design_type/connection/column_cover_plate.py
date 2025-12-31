@@ -24,15 +24,12 @@ from ...utils.common.load import Load
 import logging
 from ...custom_logger import CustomLogger
 
-
-
 class ColumnCoverPlate(MomentConnection):
 
     def __init__(self):
         super(ColumnCoverPlate, self).__init__()
         self.hover_dict = {}
         self.design_status = False
-
 
     ###############################################
     # Design Preference Functions Start
@@ -219,17 +216,17 @@ class ColumnCoverPlate(MomentConnection):
 
         return val
 
-    def out_bolt_bearing(self):
+    def out_bolt_bearing(self, arg):
 
-        bolt_type = self[0]
+        bolt_type = arg[0]
         if bolt_type != TYP_BEARING:
             return True
         else:
             return False
 
-    def preference_type(self):
+    def preference_type(self, args):
 
-        pref_type = self[0]
+        pref_type = args[0]
         if pref_type == VALUES_FLANGEPLATE_PREFERENCES[0]:
             return True
         else:
@@ -239,42 +236,55 @@ class ColumnCoverPlate(MomentConnection):
     ####################################
 
     def set_osdaglogger(self, key):
-
         """
-        Function to set Logger for Tension Module
+        Function to set Logger for FinPlate Module
         """
+        # @author Arsil Zunzunia
 
         # Set Custom logger
         logging.setLoggerClass(CustomLogger)
 
-        self.logger = logging.getLogger('Osdag')
+        # Create unique logger name per instance
+        unique_logger_name = 'Osdag_ctc_cover_plate_bolt_moment_conn'
+        self.logger = logging.getLogger(unique_logger_name)
 
         if not isinstance(self.logger, CustomLogger):
-            logging.getLogger('Osdag').manager.loggerDict.pop('Osdag', None)
-            # clear any existing handlers
-            self.logger = logging.getLogger('Osdag')
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
         
+        # Clear any existing handlers
         self.logger.handlers.clear()
-
         self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        handler = logging.FileHandler('logging_text.log')
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                                          datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
 
     def input_value_changed(self):
 
@@ -452,7 +462,7 @@ class ColumnCoverPlate(MomentConnection):
         # t99 = (None, "Block Shear in Flange & Flange plate in Axial ", TYPE_SECTION,
         #        './ResourceFiles/images/column_flange_failure.png')
         # flangecapacity.append(t99)
-        t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern \n (Half Plate)- 2 x 3 Bolts pattern considered")
+        t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern \n (Half Plate)")
         flangecapacity.append(t00)
         t99 = (None, 'Failure Pattern due to Tension in Plate and Member', TYPE_SECTION,
                [str(files("osdag_core.data.ResourceFiles.images").joinpath("2L_V.png")), 211, 350, "Block Shear Pattern"])  # [image, width, height, caption]
@@ -476,7 +486,7 @@ class ColumnCoverPlate(MomentConnection):
         webcapacity = []
 
         t00 = (
-        None, "", TYPE_NOTE, "Representative image for Failure Pattern \n (Half Plate) - 2 x 3 Bolts pattern considered")
+        None, "", TYPE_NOTE, "Representative image for Failure Pattern \n (Half Plate)")
         webcapacity.append(t00)
 
         t99 = (None, 'Failure Pattern due to tension in Member and Plate', TYPE_SECTION,
@@ -734,6 +744,38 @@ class ColumnCoverPlate(MomentConnection):
         t20 = (KEY_INNERFLANGEPLATE_THICKNESS, KEY_DISP_INNERFLANGESPLATE_THICKNESS, TYPE_TEXTBOX,
                self.flange_in_plate_tk if flag else '', False)
         out_list.append(t20)
+        
+        # Populate hover dict
+
+        # Column
+        self.hover_dict["Column"] = (
+            f"<b>Column</b><br>"
+            f"Section: {self.section.designation if flag else ''}<br>"
+            f"Depth: {self.section.depth if flag else ''} mm<br>"
+            f"Flange Width: {self.section.flange_width if flag else ''} mm<br>"
+            f"Web Thickness: {self.section.web_thickness if flag else ''} mm<br>"
+            f"Flange Thickness: {self.section.flange_thickness if flag else ''} mm"
+        )
+
+        # Cover Plates (Flange + Web)
+        self.hover_dict["Plate"] = (
+            f"<b>Cover Plates</b><br>"
+            f"Flange Plate: {self.flange_plate.length if flag else ''} × "
+            f"{self.flange_plate.height if flag else ''} × "
+            f"{self.flange_plate.thickness_provided if flag else ''} mm<br>"
+            f"Web Plate: {self.web_plate.length if flag else ''} × "
+            f"{self.web_plate.height if flag else ''} × "
+            f"{self.web_plate.thickness_provided if flag else ''} mm"
+        )
+
+        # Bolts
+        self.hover_dict["Bolt"] = (
+            f"<b>Bolts</b><br>"
+            f"Diameter: {self.bolt.bolt_diameter_provided if flag else ''} mm<br>"
+            f"Grade: {self.bolt.bolt_grade_provided if flag else ''}<br>"
+            f"Flange Bolts: {self.flange_plate.bolts_required if flag else ''}<br>"
+            f"Web Bolts: {self.web_plate.bolts_required if flag else ''}"
+        )
 
         return out_list
 

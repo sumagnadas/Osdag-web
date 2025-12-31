@@ -574,19 +574,18 @@ class Plate(Material):
                                           gauge, web_thickness, root_radius):  # todo anjalinew
 
         # max_bolts_one_line = int(((flange_plate_h_max - (2 * edge_dist)) / gauge) + 1)
-        # print("max_bolts_one_line", max_bolts_one_line)
         possible_bolt = (flange_plate_h_max / 2 - web_thickness / 2 - 2 * edge_dist) - root_radius
         if possible_bolt > 0:
             bolt_one_side = int(possible_bolt / gauge + 1)
             max_bolts_one_line = 2 * bolt_one_side
-            # print("max bolt one line", max_bolts_one_line)
+            print("max bolt one line", max_bolts_one_line)
 
             if max_bolts_one_line >= 2:
-                # print("bolts_required", bolts_required)
+                print("bolts_required", bolts_required)
                 bolt_line = max(int(math.ceil((float(bolts_required) / float(max_bolts_one_line)))), 1)
                 bolts_one_line = min(round_up(int(math.ceil(float(bolts_required) / float(bolt_line))), 2, 2),
                                      max_bolts_one_line)
-                # print("bbbb1", bolt_line, bolts_one_line)
+                print("bbbb1", bolt_line, bolts_one_line)
                 # if bolts_one_line % 2 == 1:
                 #     bolts_one_line = bolts_one_line-1
                 #     bolt_line =bolt_line  +1
@@ -594,7 +593,7 @@ class Plate(Material):
                 #     pass
 
                 height = flange_plate_h_max
-                # print("bbbb", bolt_line, bolts_one_line, height)
+                print("bbbb", bolt_line, bolts_one_line, height)
                 #     self.get_flange_plate_h_req(self.bolts_one_line, gauge, edge_dist, web_thickness, root_radius))
                 return bolt_line, bolts_one_line, height
             # if max_bolts_one_line >= 2:
@@ -716,7 +715,6 @@ class Plate(Material):
         tmv = moment_demand * xmax / sigma_r_sq
         abh = axial_load / (bolts_one_line * bolt_line)
         vres = math.sqrt((vbv + tmv) ** 2 + (tmh + abh) ** 2)
-        # print('rsq,vres', sigma_r_sq, vres)
         self.ymax = ymax
         self.xmax = xmax
         self.sigma_r_sq = sigma_r_sq
@@ -744,7 +742,7 @@ class Plate(Material):
             self.length_avail = max(((bolts_one_line - 1) * gauge), ((bolts_line - 1) * pitch))
             if self.length_avail > 15 * bolt_dia:
                 self.beta_lj = 1.075 - self.length_avail / (200 * bolt_dia)
-                # print('long joint case')
+                print('long joint case')
                 if self.beta_lj > 1:
                     self.beta_lj = 1.0
                 elif self.beta_lj < 0.75:
@@ -772,7 +770,7 @@ class Plate(Material):
                 else:
                     self.beta_lj =  round(self.beta_lj, 2)
                 bolt_capacity_red = round( self.beta_lj, 2) * bolt_capacity
-                # print('beta', round( self.beta_lj, 2))
+                print('beta', round( self.beta_lj, 2))
             else:
                 self.beta_lj = 1.0
                 bolt_capacity_red = bolt_capacity
@@ -891,8 +889,7 @@ class Plate(Material):
 
             while (bolt_line <= bolt_line_limit and vres > bolt_capacity_red) or web_plate_h == False:
                 if web_plate_h is not False:
-                    print("entered web plate details loop for bolt force:", vres, "bolt capaity reduced:",
-                          bolt_capacity_red)
+                        #   bolt_capacity_red)
                     [gauge, edge_dist, web_plate_h_recalc] = self.get_gauge_edge_dist(web_plate_h + 10, bolts_one_line,
                                                                                       min_edge_dist,
                                                                                       max_spacing, max_edge_dist)
@@ -949,8 +946,6 @@ class Plate(Material):
                 self.design_status = False
                 self.reason = "Bolt line limit is reached. Select higher grade/Diameter or choose different connection"
             else:
-                # print("passed the web plate details loop for bolt force:", vres, "bolt capaity reduced:",
-                    #   bolt_capacity_red, "no. of bolts:", bolt_line * bolts_one_line, "height", web_plate_h)
                 self.design_status = True
 
             self.length = gap + end_dist * 2 + pitch * (bolt_line - 1)
@@ -996,9 +991,9 @@ class Plate(Material):
                                                                                              bolts_required,
                                                                                              min_edge_dist, min_gauge,
                                                                                              web_thickness, root_radius)
-        # print("flange", bolt_line, bolts_one_line)
+        print("flange", bolt_line, bolts_one_line)
 
-        # print("boltdetails0", bolt_line, bolts_one_line, flange_plate_h)
+        print("boltdetails0", bolt_line, bolts_one_line, flange_plate_h)
 
         if bolts_one_line == 1 or bolts_one_line == 0:
             self.design_status = False
@@ -1007,11 +1002,11 @@ class Plate(Material):
             self.design_status = False
             self.reason = "Bolt line limit is reached. Select higher grade/Diameter or choose different connection."
         else:
-            # print("boltdetails", bolt_line, bolts_one_line, flange_plate_h)
+            print("boltdetails", bolt_line, bolts_one_line, flange_plate_h)
             [gauge, edge_dist, flange_plate_h] = \
                 self.get_gauge_edge_dist_flange(flange_plate_h, bolts_one_line, min_edge_dist, max_spacing,
                                                 max_edge_dist, web_thickness, root_radius)
-            # print("boltdetails2", bolt_line, bolts_one_line, flange_plate_h)
+            print("boltdetails2", bolt_line, bolts_one_line, flange_plate_h)
             if bolt_line == 1:
                 pitch = 0.0
             else:
@@ -1044,7 +1039,6 @@ class Plate(Material):
                                                                                      min_edge_dist, max_spacing,
                                                                                      max_edge_dist, web_thickness,
                                                                                      root_radius)
-                print("boltdetailsasaa", bolt_line, bolts_one_line, flange_plate_h)
                 if bolt_line == 1:
                     pitch = 0.0
                 else:
@@ -1059,7 +1053,6 @@ class Plate(Material):
                                                           gauge, bolt_line, pitch, bolt_capacity,
                                                           bolt_dia, end_dist, gap, edge_dist, root_radius,
                                                           web_thickness,beta_lg= beta_lg)
-                # print("boltforce", vres, bolt_capacity_red)
                 # convergence = bolt_capacity_red - vres
                 #
                 # if convergence < 0:
@@ -1900,7 +1893,6 @@ class Angle(Material):
         db_query = "SELECT * FROM Angles WHERE Designation = ?"
         cur = conn.cursor()
 
-        # print(f" Component.py connect_to_database_update_other_attributes \n designation{designation} \n material_grade{material_grade}")
         cur.execute(db_query, (designation,))
         row = cur.fetchone()
 
@@ -1939,8 +1931,6 @@ class Angle(Material):
         self.It = row[24] * 10 ** 4
         self.source = row[25]
         self.type = 'Rolled' if row[26] is None else row[26]
-        # print(f"\n connect_to_database_update_other_attributes done")
-
         conn.close()
 
     def angle_weld_length(self, weld_strength, depth_weld, force, C, depth):
@@ -1968,10 +1958,7 @@ class Angle(Material):
             if operator.le(max(leg_a_length, leg_b_length), max_leg_length_outer) and operator.ge(
                     min(leg_a_length, leg_b_length), min_leg_length_outer) and leg_a_length == leg_b_length \
                     and operator.eq(t, t_min):
-                # print("appended", designation)
                 available_angles.append(designation)
-            # else:
-                # print("popped", designation)
         return available_angles
 
     def tension_member_yielding(self, A_g, F_y):

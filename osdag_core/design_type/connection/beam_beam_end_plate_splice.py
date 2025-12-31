@@ -49,7 +49,7 @@ class BeamBeamEndPlateSplice(MomentConnection):
 
     def __init__(self):
         super(BeamBeamEndPlateSplice, self).__init__()
-
+        self.hover_dict = {}
         self.module = KEY_DISP_BB_EP_SPLICE
 
         self.load_moment = 0.0
@@ -178,38 +178,56 @@ class BeamBeamEndPlateSplice(MomentConnection):
 
         # self.func_for_validation(self, design_dictionary)
 
-    # Set logger
     def set_osdaglogger(self, key):
-        """ Function to set Logger for the module """
+        """
+        Function to set Logger for FinPlate Module
+        """
+        # @author Arsil Zunzunia
+
         # Set Custom logger
         logging.setLoggerClass(CustomLogger)
 
-        self.logger = logging.getLogger('Osdag')
+        # Create unique logger name per instance
+        unique_logger_name = 'Osdag_btb_end_plate_moment_conn'
+        self.logger = logging.getLogger(unique_logger_name)
 
         if not isinstance(self.logger, CustomLogger):
-            logging.getLogger('Osdag').manager.loggerDict.pop('Osdag', None)
-            # clear any existing handlers
-            self.logger = logging.getLogger('Osdag')
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
         
+        # Clear any existing handlers
         self.logger.handlers.clear()
-
         self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        handler = logging.FileHandler('logging_text.log')
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
 
     # set module name
     def module_name(self):
@@ -296,10 +314,9 @@ class BeamBeamEndPlateSplice(MomentConnection):
         return lst
 
 
-    def fn_conn_image(self):
+    def fn_conn_image(self, args):
         """ Display representative images of end plate type """
-
-        ep_type = self[0]
+        ep_type = args[0]
         if ep_type == VALUES_ENDPLATE_TYPE[0]:
             return str(files("osdag_core.data.ResourceFiles.images").joinpath("flush_ep.png"))
         elif ep_type == VALUES_ENDPLATE_TYPE[1]:
@@ -469,6 +486,44 @@ class BeamBeamEndPlateSplice(MomentConnection):
 
         t31 = (KEY_OUT_WELD_DETAILS, DISP_TITLE_WELD_TYPICAL_DETAIL, TYPE_OUT_BUTTON, ['Details', self.weld_details], True)
         out_list.append(t31)
+        
+        # Populate hover dict
+
+        # Beam
+        self.hover_dict["Beam"] = (
+            f"<b>Beam</b><br>"
+            f"Depth: {self.beam_D if flag else ''} mm<br>"
+            f"Flange Width: {self.beam_bf if flag else ''} mm<br>"
+            f"Web Thickness: {self.beam_tw if flag else ''} mm<br>"
+            f"Flange Thickness: {self.beam_tf if flag else ''} mm"
+        )
+
+        # End Plate
+        self.hover_dict["Plate"] = (
+            f"<b>End Plate</b><br>"
+            f"Width: {self.ep_width_provided if flag else ''} mm<br>"
+            f"Height: {self.ep_height_provided if flag else ''} mm<br>"
+            f"Thickness: {self.plate_thickness if flag else ''} mm<br>"
+            f"Moment Capacity: {self.call_helper.plate_moment_capacity if flag else ''}"
+        )
+
+        # Bolt
+        self.hover_dict["Bolt"] = (
+            f"<b>Bolt</b><br>"
+            f"Diameter: {self.bolt_diameter_provided if flag else ''} mm<br>"
+            f"Grade: {self.bolt_grade_provided if flag else ''}<br>"
+            f"No. of Bolts: {self.bolt_numbers if flag else ''}<br>"
+            f"Combined Capacity: {self.combined_capacity_critical_bolt if flag else ''}"
+        )
+
+        # Weld
+        self.hover_dict["Weld"] = (
+            f"<b>Weld</b><br>"
+            f"Type: Groove Weld<br>"
+            f"Web Weld Size: {self.weld_size_web if flag else ''} mm<br>"
+            f"Web Weld Length: {self.weld_length_web if flag else ''} mm<br>"
+            f"Allowable Stress: {self.allowable_stress if flag else ''}"
+        )
 
         return out_list
 
@@ -694,11 +749,13 @@ class BeamBeamEndPlateSplice(MomentConnection):
     def call_3DPlate(self, ui, bgcolor):
         from PySide6.QtWidgets import QCheckBox
         for chkbox in ui.cad_comp_widget.children():
-            if chkbox.objectName() == 'End Plate':
+            if chkbox.objectName() == 'Beam Beam End Plate':
                 continue
             if isinstance(chkbox, QCheckBox):
-                print(f"clearing check of {chkbox.objectName()}")
+                # CRITICAL: Block signals to prevent cascading display_3DModel calls
+                chkbox.blockSignals(True)
                 chkbox.setChecked(False)
+                chkbox.blockSignals(False)
         ui.commLogicObj.display_3DModel("Connector", bgcolor)
 
     # get the input values from UI and other functions

@@ -8,25 +8,49 @@ import operator
 import math
 import logging
 from importlib.resources import files
-import os
+from pathlib import Path
+import platform
 
 PATH_TO_DATABASE = files("osdag_core.data.ResourceFiles.Database").joinpath("Intg_osdag.sqlite")
 
-# PDFLATEX path - handle gracefully if the package structure doesn't exist
-try:
-    # Note: osdag-latex-env may not be a valid package name due to hyphens
-    # Fallback to system pdflatex if this fails
+# Cross-platform pdflatex configuration
+if platform.system() == "Windows":
     PDFLATEX = files("osdag_core.data.ResourceFiles.osdag-latex-env.bin.windows").joinpath("pdflatex.exe")
-except (ModuleNotFoundError, TypeError, AttributeError):
-    # Fallback to system pdflatex
+else:
+    # On Linux/macOS, use system pdflatex (must be installed via texlive)
     PDFLATEX = "pdflatex"
+
 
 import sqlite3
 
 from .utils.common.other_standards import *
-# from .utils.common.component import *
-# from osdag_core.design_type.connection.fin_plate_connection import FinPlateConnection
-# from osdag_core.design_type.connection.column_cover_plate import ColumnCoverPlate
+
+# This returns the documents directory path for the current user
+def get_documents_folder():
+    system = platform.system()
+    
+    if system == "Windows":
+        # Windows: typically C:\Users\Username\Documents
+        docs_path = Path.home() / "Documents"
+    elif system == "Darwin":  # macOS
+        # macOS: typically /Users/Username/Documents
+        docs_path = Path.home() / "Documents"
+    elif system == "Linux":
+        # Linux: typically /home/username/Documents
+        # Also check XDG_DOCUMENTS_DIR for custom locations
+        xdg_docs = os.environ.get("XDG_DOCUMENTS_DIR")
+        if xdg_docs:
+            docs_path = Path(xdg_docs)
+        else:
+            docs_path = Path.home() / "Documents"
+    else:
+        # Fallback to home directory for unknown systems
+        docs_path = Path.home()
+    
+    # Ensure the directory exists, otherwise fall back to home
+    if not docs_path.exists():
+        docs_path = Path.home()
+    return str(docs_path)
 
 class OurLog(logging.Handler):
 
@@ -44,7 +68,14 @@ class OurLog(logging.Handler):
             msg = "<span style='color: red;'>"+ msg +"</span>"
         elif record.levelname == 'INFO':
             msg = "<span style='color: green;'>" + msg + "</span>"
-        self.key.append(msg)
+        # Safety check: ensure QTextEdit is not deleted before appending
+        try:
+            if self.key is not None:
+                self.key.append(msg)
+        except RuntimeError:
+            # QTextEdit C++ object has been deleted - skip appending
+            pass
+
 
 
 def connectdb1():
@@ -346,17 +377,17 @@ KEY_MODULE_STATUS = 'Module.Status'
 
 TYPE_MODULE = 'Window Title'
 
-KEY_DISP_FINPLATE = 'FinPlateConnection'
+KEY_DISP_FINPLATE = 'Fin Plate Connection'
 KEY_DISP_ENDPLATE = 'End Plate Connection'
 KEY_DISP_CLEATANGLE = 'Cleat Angle Connection'
-KEY_DISP_SEATED_ANGLE = 'SeatedAngleConnection'
+KEY_DISP_SEATED_ANGLE = 'Seated Angle Connection'
 KEY_DISP_BASE_PLATE = 'Base Plate Connection'
 KEY_DISP_TRUSS_BOLTED = 'Truss Connection Bolted'
 
 KEY_DISP_BEAMCOVERPLATE = 'Beam-to-Beam Cover Plate Bolted Connection'
-KEY_DISP_COLUMNCOVERPLATE = 'Column-to-Column-Cover-Plate-Bolted-Connection'
+KEY_DISP_COLUMNCOVERPLATE = 'Column-to-Column Cover Plate Bolted Connection'
 KEY_DISP_BEAMCOVERPLATEWELD = 'Beam-to-Beam Cover Plate Welded Connection'
-KEY_DISP_COLUMNCOVERPLATEWELD = 'Column-to-Column-Cover-Plate-Welded-Connection'
+KEY_DISP_COLUMNCOVERPLATEWELD = 'Column-to-Column Cover Plate Welded Connection'
 KEY_DISP_LAPJOINTBOLTED = 'Lap Joint Bolted Connection'
 KEY_DISP_LAPJOINTWELDED = 'Lap Joint Welded Connection'
 KEY_DISP_BUTTJOINTBOLTED = 'Butt Joint Bolted Connection'
@@ -367,7 +398,6 @@ KEY_DESIGN_FOR = 'Design.For'
 KEY_DISP_DESIGN_FOR = 'Design For'
 KEY_AXIAL_FORCE = 'Load.Axial.Force'  # If not using existing KEY_AXIAL
 KEY_DISP_AXIAL_FORCE = 'Axial Force (kN)'
-
 
 # MADE THIS t.s.
 KEY_DISP_BUTTJOINTWELDED = 'Butt Joint Welded Connection'
@@ -395,7 +425,7 @@ KEY_OUT_DISP_WELD_STRENGTH_kN = 'Strength (kN)'
 
 
 # KEY_DISP_BEAMENDPLATE = 'Beam End Plate Connection'
-KEY_DISP_COLUMNENDPLATE = 'Column-to-Column-End-Plate-Connectionn'
+KEY_DISP_COLUMNENDPLATE = 'Column-to-Column End Plate Connection'
 KEY_DISP_BCENDPLATE = 'Beam-to-Column End Plate Connection'
 KEY_DISP_TENSION_BOLTED = 'Tension Member Design - Bolted to End Gusset'
 KEY_DISP_TENSION_WELDED = 'Tension Member Design - Welded to End Gusset'
@@ -407,7 +437,7 @@ DISP_TITLE_CM = 'Connecting Members'
 
 # Compression Members
 KEY_DISP_COMPRESSION_COLUMN = 'Columns with known support conditions'
-KEY_DISP_COMPRESSION_Strut = 'Struts in Trusses'
+KEY_DISP_STRUT_WELDED_END_GUSSET = 'Struts Welded to End Gusset'
 KEY_SECTION_PROPERTY = 'Section Property'
 KEY_SECTION_DATA = 'Section Data'
 KEY_MEMBER_PROPERTY = 'Member Property'
@@ -505,12 +535,11 @@ KEY_DISP_DESIGN_STRENGTH_SHEAR_ZZ = 'Shear Strength (z-z) (kN)'
 KEY_DISP_DESIGN_STRENGTH_MOMENT = 'Moment Strength (kNm)' # Design
 KEY_DISP_DESIGN_STRENGTH_MOMENT_YY = 'Moment Strength (y-y) (kNm)'
 KEY_DISP_DESIGN_STRENGTH_MOMENT_ZZ = 'Moment Strength (z-z) (kNm)'
-KEY_DISP_DESIGN_BENDING_STRENGTH = 'Design Bending Strength (kNm)'
 KEY_DISP_REDUCE_STRENGTH_MOMENT = 'Reduced Moment Strength (kNm)'
 KEY_EULER_BUCKLING_STRESS = 'MajorBucklingStress'
 KEY_DISP_EULER_BUCKLING_STRESS = 'Buckling Stress (MPa)' # Euler 
 KEY_EFF_SEC_AREA = 'MajorEffSecArea'
-KEY_DISP_EFF_SEC_AREA = 'Eff. Sectional Area (mm<sup>2</sup>)' # ective
+KEY_DISP_EFF_SEC_AREA = 'Eff. Sectional Area (cm<sup>2</sup>)' # ective
 KEY_EFF_LEN = 'Major.Effective_Length'
 KEY_DISP_EFF_LEN = 'Eff. Length (m)' # ective
 KEY_BUCKLING_CURVE = 'BucklingCurve'
@@ -536,6 +565,7 @@ Buckling_Type = 'Type of Buckling'
 End_Connection_title = 'End Connection Details'
 KEY_COMP_STRESS = 'MinorDCS'
 KEY_DISP_COMP_STRESS = 'Compressive Stress (MPa)'
+KEY_DISP_DESIGN_BENDING_STRENGTH = 'Design Bending Strength (kNm)'
 
 KEY_Buckling_Out_plane = ' Out_of_Plane'
 KEY_Buckling_In_plane =  ' In_Plane'
@@ -603,7 +633,7 @@ KEY_DISP_BUCKLING_STRENGTH= 'Buckling Strength (kN)'
 KEY_WEB_CRIPPLING= 'Crippling.Strength'
 KEY_DISP_CRIPPLING_STRENGTH = 'Crippling Strength (kN)'
 KEY_DISP_LTB= 'Lateral Torsional Buckling Details'
-KEY_DISP_Elastic_CM= 'Critical Moment (M<sub>cr</sub>)'# Elastic
+KEY_DISP_Elastic_CM= 'Critical Moment (M<sub>cr</sub>) (kNm)'# Elastic
 KEY_DISP_Elastic_CM_YY= 'Critical Moment (y-y) (M<sub>cr</sub>)'
 KEY_DISP_Elastic_CM_ZZ= 'Critical Moment (z-z) (M<sub>cr</sub>)'
 KEY_DISP_Elastic_CM_latex= 'Elastic Critical Moment(kNm)' #
@@ -723,11 +753,11 @@ KEY_DISP_r_eff_latex = '$r_{eff}$web'
 KEY_DISP_K_v_latex = '$K_{v}$'
 KEY_DISP_Elastic_Critical_shear_stress_web = 'Elastic Critical Shear Stress Web($N/mm^2$)' #(\tau_{crc})
 KEY_DISP_Transverse_Stiffener_spacing = 'Spacing of Transverse Stiffeners(c)(mm)'
-KEY_DISP_slenderness_ratio_web = 'Web Slenderness ratio($\lambda_w$)'
+KEY_DISP_slenderness_ratio_web = r'Web Slenderness ratio($\lambda_w$)'
 KEY_DISP_BUCKLING_STRENGTH= 'Buckling Resistance (kN)'
 KEY_DISP_reduced_moment= 'Reduced moment (Nmm)'
 # KEY_DISP_reduced_moment= 'Reduced moment (N_f)'
-KEY_DISP_tension_field_incline= 'Tension field inclination($\phi$)'
+KEY_DISP_tension_field_incline= r'Tension field inclination($\phi$)'
 KEY_DISP_Yield_Strength_Tension_field = 'Yield Strength of Tension field(f_v)($N/mm^2$)'
 KEY_DISP_AnchoragelengthTensionField= 'Anchorage length of Tension Field(s)(mm)'
 KEY_DISP_WidthTensionField= 'Width of Tension Field($w_{tf}$)'
@@ -750,27 +780,19 @@ KEY_IntermediateStiffener = 'IntermediateStiffener.Data'
 KEY_DISP_IntermediateStiffener = 'Intermediate Stiffener'
 KEY_DISP_Plate_Girder_PROFILE = 'Section Profile'
 KEY_IntermediateStiffener_spacing = 'IntermediateStiffener.Spacing'
-KEY_DISP_IntermediateStiffener_spacing = 'Intermediate Stiffener Spacing'
+KEY_DISP_IntermediateStiffener_spacing = 'Intermediate Stiffener Spacing (mm)'
 KEY_LongitudnalStiffener = 'LongitudnalStiffener.Data'
 KEY_LongitudnalStiffener_thickness = 'LongitudnalStiffner.Thickness'
+KEY_LongitudnalStiffener_thickness_val = 'LongitudnalStiffner.Thickness.val'
 KEY_DISP_LongitudnalStiffener = 'Longitudnal Stiffener'
-KEY_DISP_LongitudnalStiffener_thickness = 'Longitudnal Stiffener Thickness'
+KEY_DISP_LongitudnalStiffener_thickness = 'Longitudnal Stiffener Thickness (mm)'
 KEY_IntermediateStiffener_thickness = 'IntermediateStiffener.Thickness'
-KEY_DISP_IntermediateStiffener_thickness = 'Intermediate Stiffener Thickness'
-KEY_IntermediateStiffener_thickness_val = 'IntermediateStiffener.Thickness.Val'
-KEY_LongitudnalStiffener_thickness_val = 'LongitudnalStiffener.Thickness.Val'
-KEY_LongitudnalStiffener_numbers = 'LongitudnalStiffener.Numbers'
-KEY_DISP_LongitudnalStiffener_numbers = 'Longitudnal Stiffener Numbers'
-KEY_EndpanelStiffener_thickness = 'EndpanelStiffener.Thickness'
-KEY_DISP_EndpanelStiffener_thickness = 'Endpanel Stiffener Thickness'
-KEY_LongitudinalStiffener1_pos = 'LongitudinalStiffener1.Position'
-KEY_DISP_LongitudinalStiffener1_pos = 'Longitudinal Stiffener 1 Position'
-KEY_LongitudinalStiffener2_pos = 'LongitudinalStiffener2.Position'
-KEY_DISP_LongitudinalStiffener2_pos = 'Longitudinal Stiffener 2 Position'
+KEY_IntermediateStiffener_thickness_val = 'IntermediateStiffener.Thickness.val'
+KEY_DISP_IntermediateStiffener_thickness = 'Intermediate Stiffener Thickness (mm)'
 KEY_WeldWebtoflange= 'WeldWebtoflange.Data'
-KEY_DISP_WeldWebtoflange= 'Weld for Web to Flange'
+KEY_DISP_WeldWebtoflange= 'Weld for Web to Flange (mm)'
 KEY_WeldStiffenertoweb= 'WeldStiffenertoweb.Data'
-KEY_DISP_WeldStiffenertoweb= 'Weld for Stiffener to Web'
+KEY_DISP_WeldStiffenertoweb= 'Weld for Stiffener to Web (mm)'
 KEY_IS_IT_SYMMETRIC = 'Girder.Symmetry'
 KEY_DISP_IS_IT_SYMMETRIC = 'Symmetry'
 KEY_DISP_SYM = 'Symmetric Girder'
@@ -844,13 +866,25 @@ KEY_MAX_DEFL = 'Deflection.Max'
 KEY_DISP_MAX_DEFL = 'Maximum Deflection'
 VALUES_MAX_DEFL = ['Span/600','Span/800','Span/400','Span/300','Span/360','Span/150','Span/180','Span/240','Span/120','Span/500','Span/750','Span/1000']
 KEY_SUPPORT_WIDTH = 'Support.Width'
-KEY_DISP_SUPPORT_WIDTH = 'Support Width (mm)'
+KEY_DISP_SUPPORT_WIDTH = 'Support Width (mm) *'
+VALUES_STIFFENER_THICKNESS = ['8', '10', '12', '14', '16', '18', '20', '22', '25', '28', '32', '36', '40', '45', '50', '56', '63', '75', '80', '90', '100',
+                        '110', '120']
+KEY_EndpanelStiffener_thickness = 'EndpanelStiffener.Thickness'
+KEY_LongitudnalStiffener_numbers = 'LongitudnalStiffener.Numbers'
+KEY_LongitudinalStiffener1_pos = 'LongitudnalStiffener1.Position'
+KEY_DISP_LongitudinalStiffener1_pos = 'Position of Longitudnal Stiffener 1 from NA (mm) '
+KEY_LongitudinalStiffener2_pos = 'LongitudnalStiffener2.Position'
+KEY_DISP_LongitudinalStiffener2_pos = 'Position of Longitudnal Stiffener 2 from NA (mm)'
+KEY_DISP_LongitudnalStiffener_numbers = 'Number of Longitudnal Stiffeners'
+KEY_DISP_EndpanelStiffener_thickness = 'End Panel Stiffener Thickness (mm)'
+KEY_OVERALL_DEPTH_PG_CST = "Overall Depth (D) (mm)"
+KEY_DISP_DESIGN_BENDING_STRENGTH = 'Design Bending Strength (kNm)'
  
 ###################################
 # All Input Keys
 ###################################
 KEY_MODULE = 'Module'
-KEY_CONN = 'Connectivity'
+KEY_CONN = 'Connectivity *'
 KEY_TABLE = 'Table'
 KEY_MEMBERS = 'No of Members'
 KEY_LOCATION = 'Conn_Location'
@@ -1149,6 +1183,7 @@ KEY_DISP_MEMBERS = 'No of Members'
 #lapjointbolted
 KEY_PLATE1_THICKNESS = "Plate1Thickness"
 KEY_PLATE2_THICKNESS = "Plate2Thickness" 
+KEY_PLATEC_THICKNESS = "PlatecThickness" 
 KEY_PLATE_WIDTH = "PlateWidth"
 KEY_DISP_PLATE1_THICKNESS = "Thickness of Plate-1 (mm) *"
 KEY_DISP_PLATE2_THICKNESS = "Thickness of Plate-2 (mm) *"
@@ -1503,7 +1538,7 @@ KEY_DISP_DP_BOLT_DESIGN_PARA = 'HSFG Bolt:'
 
 
 KEY_DISP_DP_BOLT_SLIP_FACTOR = 'Slip Factor, (mu<sub>f</sub>)'
-KEY_DISP_DP_BOLT_SLIP_FACTOR_REPORT = 'Slip Factor, ($\mu_{f}$)'
+KEY_DISP_DP_BOLT_SLIP_FACTOR_REPORT = r'Slip Factor, ($\mu_{f}$)'
 KEY_DISP_DP_BOLT_FU = 'Bolt Ultimate Strength (N/mm2)'
 KEY_DISP_DP_BOLT_FY = 'Bolt Yield Strength (N/mm2)'
 KEY_DISP_GAMMA_M0 = "Governed by Yielding"
@@ -1943,9 +1978,10 @@ KEY_DISP_EDGEDIST_W = 'Edge Distance (mm)'
 KEY_WEB_CAPACITY ='section.web_capacities'
 KEY_DISP_WEB_CAPACITY ='Capacity'
 
-# SimpleConnection(Tension+Compression)
+#SimpleConnection(Tension+Compression)
 KEY_OUT_DESIGN_FOR = "Design For" 
 KEY_OUT_DISP_DESIGN_FOR = "Design For"
+
 
 # Web plate
 KEY_REDUCTION_FACTOR_WEB ='web_plate.red,factor'
@@ -2555,8 +2591,6 @@ KEY_DISP_LEN_INLINE = 'Total Length in line with tension'
 KEY_LEN_OPPLINE = 'Total length opp line with tension'
 KEY_DISP_LEN_OPPLINE = 'Total Length opp line with tension'
 
-
-# VALUES_ANGLESEC_CUSTOMIZED= connectdb("Angles", call_type="popup")
 try:
   VALUES_ANGLESEC_CUSTOMIZED= connectdb("Angles", call_type="popup")
 except Exception as e:
@@ -2579,8 +2613,6 @@ def get_available_cleat_list(input_angle_list, max_leg_length=math.inf, min_leg_
         if operator.le(max(leg_a_length,leg_b_length),max_leg_length_outer) and operator.ge(min(leg_a_length,leg_b_length), min_leg_length_outer) and leg_a_length==leg_b_length:
             # print("appended", designation)
             available_angles.append(designation)
-        # else:
-            # print("popped",designation)
     return available_angles
 
 
@@ -2612,6 +2644,9 @@ except Exception as e:
     all_angles = []
 
 VALUES_CLEAT_CUSTOMIZED = get_available_cleat_list(all_angles, 200.0, 50.0)
+# print(all_angles)
+# print("customised")
+# print(VALUES_CLEAT_CUSTOMIZED)
 
 BOLT_DESCRIPTION = str("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
                 "<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"

@@ -16,8 +16,6 @@ class CleatAngleConnection(ShearConnection):
         self.sptd_leg_length = 0.0
         self.sptIng_leg_length = 0.0
         self.design_status = False
-        # Ensure logs container exists for downstream consumers (e.g., CAD/export)
-        self.logs = []
         # To capture all the hover labels required
         self.hover_dict = {}
 
@@ -454,6 +452,7 @@ class CleatAngleConnection(ShearConnection):
 
         bolt_bearing_capacity_disp = ''
         if flag is True:
+            print("wats this",self.bolt.bolt_bearing_capacity)
             if self.bolt.bolt_bearing_capacity != 'N/A':
                 bolt_bearing_capacity_disp = round(self.bolt.bolt_bearing_capacity / 1000, 2)
             else:
@@ -571,65 +570,66 @@ class CleatAngleConnection(ShearConnection):
         return spting_spacing
 
     def set_osdaglogger(self, key):
-
         """
         Function to set Logger for FinPlate Module
         """
 
-        # @author Arsil Zunzunia
-        #
         # Set Custom logger
-        global logger
         logging.setLoggerClass(CustomLogger)
 
-        self.logger = logging.getLogger('Osdag')
+        # Create unique logger name per instance
+        unique_logger_name = f'Osdag_cleat_angle_shear_conn'
+        self.logger = logging.getLogger(unique_logger_name)
 
         if not isinstance(self.logger, CustomLogger):
-            logging.getLogger('Osdag', None).manager.loggerDict.pop('Osdag', None)
-            # clear any existing handlers
-            self.logger = logging.getLogger('Osdag')
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
         
+        # Clear any existing handlers
         self.logger.handlers.clear()
         self.logger.setLevel(logging.DEBUG)
+        
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        handler = logging.FileHandler('logging_text.log')
-
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-
-        # Route module-level logger variable used across the class to the instance logger
-        global logger
-        logger = self.logger
-
-        # Route module-level logger variable used across the class to the instance logger
-        logger = self.logger
-
-        # Expose logger-backed logs buffer if available
-        self.logs = self.logger.get_logs() if hasattr(self.logger, "get_logs") else []
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
 
     def module_name(self):
         return KEY_DISP_CLEATANGLE
 
     def set_input_values(self, design_dictionary):
-        # print(design_dictionary)
+        print(design_dictionary)
 
         super(CleatAngleConnection,self).set_input_values(design_dictionary)
         self.module = design_dictionary[KEY_MODULE]
         self.cleat_list = design_dictionary[KEY_ANGLE_LIST]
         self.cleat_material_grade = design_dictionary[KEY_CONNECTOR_MATERIAL]
-        # print(self.cleat_list)
+        print(self.cleat_list)
         self.bolt2 = Bolt(grade=design_dictionary[KEY_GRD], diameter=design_dictionary[KEY_D],
                          bolt_type=design_dictionary[KEY_TYP],
                          bolt_hole_type=design_dictionary[KEY_DP_BOLT_HOLE_TYPE],
@@ -693,7 +693,7 @@ class CleatAngleConnection(ShearConnection):
                 self.load.shear_force = min(round(0.15 * self.supported_section.shear_yielding_capacity / 1000, 0),
                                             40.0)
 
-            # print("preliminary member check is satisfactory. Checking available Bolt Diameters")
+            print("preliminary member check is satisfactory. Checking available Bolt Diameters")
             self.supported_section.design_status = True
             self.select_bolt_dia_beam()
 
@@ -704,6 +704,7 @@ class CleatAngleConnection(ShearConnection):
                 "than the applied load. Define a large/larger section(s) or decrease the load."
                 .format(round(self.supported_section.low_shear_capacity / 1000, 2),
                         round(self.supported_section.tension_yielding_capacity / 1000, 2)))
+            print("The preliminary member check(s) have failed. Select a large/larger section(s) or decrease load and re-design.")
 
     def select_bolt_dia_beam(self):
 
@@ -713,7 +714,7 @@ class CleatAngleConnection(ShearConnection):
         trial = 0
 
         self.min_plate_height = self.supported_section.min_plate_height()
-        # print(self.min_plate_height, "is min height")
+        print(self.min_plate_height, "is min height")
         self.max_plate_height = self.supported_section.max_plate_height(self.connectivity,
                                                                               self.supported_section.notch_ht)
 
@@ -925,7 +926,7 @@ class CleatAngleConnection(ShearConnection):
         """This function sorts the list of available options and selects the combination with least leg size or
         thickness or number of bolts"""
         self.output.sort(key=lambda x: (x[4], x[3], x[13]))
-        # print(self.output[0])
+        print(self.output[0])
 
         self.bolt.bolt_diameter_provided = self.output[0][0]
         self.bolt.bolt_PC_provided = self.output[0][1]
@@ -1403,6 +1404,7 @@ class CleatAngleConnection(ShearConnection):
                             web_moment=0.0, ecc=leg.ecc,
                             moment_demand=round(leg.moment_demand, 2)), '')
                     else:
+                        print("ecc",self.spting_leg.end_dist_provided + self.cleat.thickness + self.cleat.root_radius)
                         ecc = self.spting_leg.end_dist_provided + self.cleat.thickness + self.cleat.root_radius + \
                               self.spting_leg.pitch_provided * (self.spting_leg.bolt_line-1)/2
                         leg.get_vres(leg.bolts_one_line, leg.pitch_provided, leg.gauge_provided, leg.bolt_line,
@@ -1598,3 +1600,4 @@ class CleatAngleConnection(ShearConnection):
         CreateLatex.save_latex(CreateLatex(), self.report_input, self.report_check, popup_summary, fname_no_ext,
                                rel_path, Disp_2d_image, Disp_3D_image, module=self.module)
         return True
+

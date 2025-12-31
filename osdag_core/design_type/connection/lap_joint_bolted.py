@@ -19,11 +19,10 @@ from ...Common import *
 from ...design_report.reportGenerator_latex import CreateLatex
 from ...Report_functions import *
 from ...utils.common.load import Load
+from ...custom_logger import CustomLogger
 import logging
 
 import math
-
-from PyQt5.QtCore import Qt
 
 class LapJointBolted(MomentConnection):
     def __init__(self):
@@ -35,9 +34,21 @@ class LapJointBolted(MomentConnection):
         self.base_metal_capacity_kN = None
         self.utilization_breakdown = {}
         self.design_error = ''
-        self.logs = []
+        self.hover_dict = {}
         
-        # self.spacing = None
+        # Initialize bolt placeholder - will be replaced in set_input_values
+        self.bolt = None
+        # Initialize attributes needed for output_values before design runs
+        self.rows = 0
+        self.cols = 0
+        self.number_bolts = 0
+        self.len_conn = 0
+        self.slip_res = None
+        self.utilization_ratio = 0
+        # NOTE: Don't initialize self.spacing = None here - it would shadow the spacing() method!
+        # Initialize plate placeholders for output_values hover dict
+        self.plate1 = None
+        self.plate2 = None
 
     ###############################################
     # Design Preference Functions Start
@@ -144,37 +155,57 @@ class LapJointBolted(MomentConnection):
     ####################################
     # Design Preference Functions End
     ####################################
+
     def set_osdaglogger(self, key):
+        """
+        Function to set Logger for FinPlate Module
+        """
+        # @author Arsil Zunzunia
 
-        """Function to set Logger for Tension Module"""
-        global logger
-        logger = logging.getLogger('Osdag')
+        # Set Custom logger
+        logging.setLoggerClass(CustomLogger)
 
-        def add_logs(record):
-            self.logs.append({'msg': record.getMessage()})
-            return True
-        # Checks if it should print the message or not (will always print it as True returned)
-        logger.addFilter(add_logs)
+        # Create unique logger name per instance
+        unique_logger_name = 'Osdag_lap_joint_bolted_simple_conn'
+        self.logger = logging.getLogger(unique_logger_name)
 
-        logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        if not isinstance(self.logger, CustomLogger):
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
+        
+        # Clear any existing handlers
+        self.logger.handlers.clear()
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        handler = logging.FileHandler('logging_text.log')
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                                          datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
 
     def input_value_changed(self):
 
@@ -244,7 +275,7 @@ class LapJointBolted(MomentConnection):
         spacing.append(t00)
 
         t99 = (None, 'Spacing Details', TYPE_SECTION,
-            [str(files("osdag_core.data.ResourceFiles.images").joinpath("spacing_3.png")), 400, 277, ""])
+            [str(files("osdag.data.ResourceFiles.images").joinpath("spacing_3.png")), 400, 277, ""])
         spacing.append(t99)
 
         t9 = (KEY_OUT_PITCH, KEY_OUT_DISP_PITCH, TYPE_TEXTBOX, self.final_gauge if status else '')
@@ -262,31 +293,37 @@ class LapJointBolted(MomentConnection):
         return spacing
     
     def output_values(self, flag):
-
+        """
+        Return output field definitions for the Output Dock.
+        Uses safe access pattern for attributes that may not exist before design runs.
+        """
         out_list = []
         t4 = (None, DISP_TITLE_BOLTD, TYPE_TITLE, None, True)
         out_list.append(t4)
 
+        # Safe access: check both flag and that self.bolt exists
         t2 = (KEY_OUT_D_PROVIDED, KEY_OUT_DISP_D_PROVIDED, TYPE_TEXTBOX,
-             self.bolt.bolt_diameter_provided if flag else '', True)
+             self.bolt.bolt_diameter_provided if flag and self.bolt else '', True)
         out_list.append(t2)
 
         t3 = (KEY_OUT_GRD_PROVIDED, KEY_OUT_DISP_GRD_PROVIDED, TYPE_TEXTBOX,
-              self.bolt.bolt_grade_provided if flag else '', True)
+              self.bolt.bolt_grade_provided if flag and self.bolt else '', True)
         out_list.append(t3)
 
         t31 = (KEY_OUT_TYP_PROVIDED, KEY_OUT_DISP_TYP_PROVIDED, TYPE_TEXTBOX,
-              self.bolt.bolt_type if flag else '' , True)
+              self.bolt.bolt_type if flag and self.bolt else '', True)
         out_list.append(t31)
 
-        t8 = (KEY_OUT_BOLT_SHEAR,KEY_OUT_DISP_BOLT_SHEAR , TYPE_TEXTBOX,self.bolt.bolt_shear_capacity if flag else '', True)  #convert to kn at last of the program
+        t8 = (KEY_OUT_BOLT_SHEAR, KEY_OUT_DISP_BOLT_SHEAR, TYPE_TEXTBOX,
+              self.bolt.bolt_shear_capacity if flag and self.bolt else '', True)
         out_list.append(t8) 
 
-        t4 = (KEY_OUT_BOLT_BEARING, KEY_OUT_DISP_BOLT_BEARING, TYPE_TEXTBOX, self.bolt.bolt_bearing_capacity if flag else '', True)
+        t4 = (KEY_OUT_BOLT_BEARING, KEY_OUT_DISP_BOLT_BEARING, TYPE_TEXTBOX,
+              self.bolt.bolt_bearing_capacity if flag and self.bolt else '', True)
         out_list.append(t4)
 
         t5 = (KEY_OUT_BOLT_CAPACITY, KEY_OUT_DISP_BOLT_CAPACITY, TYPE_TEXTBOX,
-            self.bolt.bolt_capacity if flag else '', True)
+            self.bolt.bolt_capacity if flag and self.bolt else '', True)
         out_list.append(t5)
 
         t500 = (KEY_OUT_BOLT_SLIP, KEY_OUT_DISP_BOLT_SLIP, TYPE_TEXTBOX,
@@ -295,21 +332,27 @@ class LapJointBolted(MomentConnection):
 
         t17 = (None, DISP_TITLE_BOLTDS, TYPE_TITLE, None, True)
         out_list.append(t17)
-        t17 = (KEY_OUT_TOT_NO_BOLTS, KEY_OUT_DISP_TOT_NO_BOLTS, TYPE_TEXTBOX, self.number_bolts if flag else '', True)
+        t17 = (KEY_OUT_TOT_NO_BOLTS, KEY_OUT_DISP_TOT_NO_BOLTS, TYPE_TEXTBOX,
+               self.number_bolts if flag else '', True)
         out_list.append(t17)
-        t18 = (KEY_OUT_ROW_PROVIDED, KEY_OUT_DISP_ROW_PROVIDED, TYPE_TEXTBOX,self.rows if flag else '', True)
+        t18 = (KEY_OUT_ROW_PROVIDED, KEY_OUT_DISP_ROW_PROVIDED, TYPE_TEXTBOX,
+               self.rows if flag else '', True)
         out_list.append(t18)
 
-        t19 = (KEY_OUT_COL_PROVIDED, KEY_OUT_DISP_COL_PROVIDED, TYPE_TEXTBOX,self.cols if flag else '', True)
+        t19 = (KEY_OUT_COL_PROVIDED, KEY_OUT_DISP_COL_PROVIDED, TYPE_TEXTBOX,
+               self.cols if flag else '', True)
         out_list.append(t19)
 
-        t20 = (KEY_OUT_BOLT_CONN_LEN, KEY_OUT_DISP_BOLT_CONN_LEN, TYPE_TEXTBOX, self.len_conn if flag else '', True)
+        t20 = (KEY_OUT_BOLT_CONN_LEN, KEY_OUT_DISP_BOLT_CONN_LEN, TYPE_TEXTBOX,
+               self.len_conn if flag else '', True)
         out_list.append(t20)
 
-        t29 = (KEY_UTILIZATION_RATIO, KEY_DISP_UTILIZATION_RATIO, TYPE_TEXTBOX,self.utilization_ratio if flag else '', True)
+        t29 = (KEY_UTILIZATION_RATIO, KEY_DISP_UTILIZATION_RATIO, TYPE_TEXTBOX,
+               self.utilization_ratio if flag else '', True)
         out_list.append(t29)
 
-        t30 = (KEY_OUT_DESIGN_FOR, KEY_OUT_DISP_DESIGN_FOR, TYPE_TEXTBOX, self.design_for if flag else '', True)
+        t30 = (KEY_OUT_DESIGN_FOR, KEY_OUT_DISP_DESIGN_FOR, TYPE_TEXTBOX,
+               self.design_for if flag else '', True)
         out_list.append(t30)
 
         t31 = (KEY_OUT_BASE_METAL_CAPACITY, KEY_OUT_DISP_BASE_METAL_CAPACITY, TYPE_TEXTBOX,
@@ -327,7 +370,34 @@ class LapJointBolted(MomentConnection):
         t21 = (KEY_OUT_SPACING, KEY_OUT_DISP_SPACING, TYPE_OUT_BUTTON, ['Spacing Details', self.spacing], True)
         out_list.append(t21)
 
+        # Populate Hover Dict (Lap Joint Bolted)
+        self.hover_dict["Plate 1"] = (
+            f"<b>Plate 1</b><br>"
+            f"Length: {2} mm<br>"
+            f"Width: {2} mm<br>"
+            f"Thickness: {2} mm"
+        )
 
+        self.hover_dict["Plate 2"] = (
+            f"<b>Plate 2</b><br>"
+            f"Length: {2} mm<br>"
+            f"Width: {2} mm<br>"
+            f"Thickness: {2} mm"
+        )
+
+        self.hover_dict["Cover Plate"] = (
+            f"<b>Cover Plate</b><br>"
+            f"Length: {2} mm<br>"
+            f"Width: {2} mm<br>"
+            f"Thickness: {2} mm"
+        )
+
+        self.hover_dict["Bolt"] = (
+            f"<b>Bolt</b><br>"
+            f"Grade: {self.bolt.bolt_grade_provided if flag and self.bolt else ''}<br>"
+            f"Diameter: {self.bolt.bolt_diameter_provided if flag and self.bolt else ''} mm<br>"
+            f"No. of Bolts: {self.number_bolts if flag else ''}"
+        )
 
         return out_list
     
@@ -344,7 +414,7 @@ class LapJointBolted(MomentConnection):
         flag1 = False
         flag2 = False
 
-        option_list = self.input_values(self)
+        option_list = self.input_values()
         missing_fields_list = []
 
         # print(f'\n func_for_validation option list = {option_list}'
@@ -430,7 +500,7 @@ class LapJointBolted(MomentConnection):
         self.count = 0
         self.slip_res = None
         self.yield_stress = None
-        # self.number_bolts = 0
+        self.number_bolts = 0  # Initialize to prevent AttributeError if design fails early
         self.cap_red = False
         self.bolt_dia_grade_status = False
         self.dia_available = False
@@ -492,19 +562,19 @@ class LapJointBolted(MomentConnection):
                     # self.bolt.calculate_bolt_tension_capacity(bolt_diameter_provided=self.bolt.bolt_diameter_provided,
                     #                                               bolt_grade_provided=self.bolt.bolt_grade_provided)
                     # print("fnafnafan",self.bolt.bolt_capacity)
-                    self.bolt.min_pitch_round = min(self.bolt.min_pitch_round, 2.5 * float(self.bolt.bolt_diameter_provided))
-                    self.bolt.min_gauge_round = min(self.bolt.min_gauge_round, 2.5 * float(self.bolt.bolt_diameter_provided))
+                    # NOTE: calculate_bolt_spacing_limits() already correctly implements IS 800:2007:
+                    # - Cl. 10.2.2: min_pitch = 2.5 × d
+                    # - Cl. 10.2.4.2: min_edge/end_dist = 1.7 × d₀ (sheared) or 1.5 × d₀ (machine cut)
+                    # where d₀ = hole diameter (not bolt diameter)
+                    # No manual overrides needed - the IS800_2007 utility functions are correct.
 
-                    if design_dictionary[KEY_DP_DETAILING_EDGE_TYPE] == 'Sheared or hand flame cut':
-                        self.bolt.min_edge_dist_round = round(max(1.7 * float(self.bolt.bolt_diameter_provided),self.bolt.min_edge_dist_round),0)
-                        self.bolt.min_end_dist_round = round(max(1.7 * float(self.bolt.bolt_diameter_provided),self.bolt.min_end_dist_round),0)
-                    else:
-                        self.bolt.min_edge_dist_round = round(max(1.5 * float(self.bolt.bolt_diameter_provided),self.bolt.min_edge_dist_round),0)
-                        self.bolt.min_end_dist_round = round(max(1.5 * float(self.bolt.bolt_diameter_provided),self.bolt.min_end_dist_round),0)
+                    # Maximum pitch per Cl. 10.2.3.1: min(32t, 300mm)
+                    self.max_pitch_round = self.max_gauge_round = min(32 * self.pltthk, 300)
 
-                    self.max_pitch_round = self.max_gauge_round = min(32 * self.pltthk , 300)
-
-                    self.bolt.max_edge_dist_round = self.bolt.max_end_dist_round = round(min(self.bolt.max_edge_dist_round , 12 * self.pltthk * ((250 / self.yield_stress)** 0.5 )),0)                
+                    # Maximum edge/end distance per Cl. 10.2.4.3: 12tε where ε = √(250/fy)
+                    epsilon = math.sqrt(250 / self.yield_stress)
+                    self.bolt.max_edge_dist_round = self.bolt.max_end_dist_round = round(
+                        min(self.bolt.max_edge_dist_round, 12 * self.pltthk * epsilon), 0)                
                     self.bolt.calculate_bolt_capacity(bolt_diameter_provided=float(self.bolt.bolt_diameter_provided),
                                               bolt_grade_provided=float(self.bolt.bolt_grade_provided),
                                               conn_plates_t_fu_fy=self.bolt_conn_plates_t_fu_fy,
@@ -523,11 +593,11 @@ class LapJointBolted(MomentConnection):
 
         if self.dia_available == False:
             self.design_status = False
-            logger.warning(" : The combined thickness ({} mm) exceeds the allowable large grip limit check (of {} mm) for the minimum available "
+            self.logger.warning(" : The combined thickness ({} mm) exceeds the allowable large grip limit check (of {} mm) for the minimum available "
                            "bolt diameter of {} mm [Ref. Cl.10.3.3.2, IS 800:2007]."
                            .format((float(self.plate1thk) + float(self.plate2thk)),(8*self.bolt.bolt_diameter[-1]),self.bolt.bolt_diameter[-1]))
-            logger.error(": Design is not safe. \n ")
-            logger.info(" :=========End Of design===========")
+            self.logger.error(": Design is not safe. \n ")
+            self.logger.info(" :=========End Of design===========")
 
         # elif self.dia_available == True and self.bolt_dia_grade_status == False:
         #     self.design_status = True
@@ -536,7 +606,7 @@ class LapJointBolted(MomentConnection):
         #     self.bolt.bolt_shear_capacity = round(float(self.bolt.bolt_shear_capacity),2)
         #     self.bolt.bolt_capacity = round(float(self.bolt.bolt_capacity),2)       
         #     print(self.bolt)
-        #     self.number_r_c_bolts(design_dictionary)
+        #     self.number_r_c_bolts(self, design_dictionary)
 
         
         else:
@@ -549,8 +619,16 @@ class LapJointBolted(MomentConnection):
             self.number_r_c_bolts(design_dictionary,0,0)
 
 
-    def number_r_c_bolts(self,design_dictionary,count=0,hit=0):
+    def number_r_c_bolts(self, design_dictionary, count=0, hit=0):
+        """
+        Calculate bolt layout (rows x cols) using deterministic algorithm.
         
+        Per IS 800:2007:
+        - min_pitch/gauge: Cl. 10.2.2 (2.5d)
+        - min_end_dist: Cl. 10.2.4.2 (1.7d₀ or 1.5d₀)
+        - max_pitch: Cl. 10.2.3.1 (min(32t, 300mm))
+        - max_end_dist: Cl. 10.2.4.3 (12tε)
+        """
         bolt_cap = self.bolt.bolt_capacity
         if self.bolt.bolt_type == 'Bearing Bolt':
             self.slip_res = 'N/A'
@@ -558,53 +636,110 @@ class LapJointBolted(MomentConnection):
             self.slip_res = self.bolt.bolt_capacity
             self.bolt.bolt_bearing_capacity = 'N/A'
             self.bolt.bolt_shear_capacity = 'N/A'
-            
-        # print("fafafa",bolt_cap)
-        
+
+        # Calculate required number of bolts
         if hit == 0:
-            self.number_bolts = float(self.tensile_force) /( bolt_cap / 1000)
+            self.number_bolts = float(self.tensile_force) / (bolt_cap / 1000)
         else:
             self.number_bolts += 1
-        
-        print("Hit",hit,self.number_bolts)
-        
+
         self.number_bolts = math.ceil(self.number_bolts)
         if self.number_bolts < 2:
             self.number_bolts = 2
 
-        def check_no_cols(numbolts):  #in function for recursive call
-            if (2 * self.bolt.min_end_dist_round) + ((numbolts - 1 )*self.bolt.min_pitch_round) >= float(self.width):
-                return True
-            else:
-                return False
+        # === DETERMINISTIC LAYOUT ALGORITHM ===
+        # Step 1: Calculate available width for bolts (after deducting end distances)
+        min_end_dist = self.bolt.min_end_dist_round
+        min_gauge = self.bolt.min_gauge_round
+        max_gauge = self.max_gauge_round
+        max_end_dist = self.bolt.max_end_dist_round
+        plate_width = float(self.width)
 
-        self.cols = 1
-        self.rows = self.number_bolts
-        temp_rows = self.rows
-        while True:
-            if check_no_cols(temp_rows):
-                temp_rows = math.ceil(self.rows/(self.cols + 1))
-                self.cols += 1
-            else:
-                break
-        self.rows = math.ceil(self.rows/self.cols)  
+        available_width = plate_width - 2 * min_end_dist
 
-        if self.cols>1:
-            self.len_conn = (self.cols - 1)*self.bolt.min_pitch_round + 2*self.bolt.min_end_dist_round
+        # Step 2: Check if plate width is sufficient
+        if available_width < 0:
+            self.design_status = False
+            self.logger.error(f": Design Failed - Plate width ({plate_width} mm) is too small. "
+                            f"Minimum required = {2 * min_end_dist} mm (2 × min_end_dist per Cl. 10.2.4.2)")
+            self.logger.info(" :=========End Of design===========")
+            self.design_error = "Plate width is too small for bolt arrangement."
+            return
 
+        # Step 3: Calculate maximum bolts that can fit in one row (gauge direction)
+        if available_width >= min_gauge:
+            max_bolts_per_row = int(available_width / min_gauge) + 1
         else:
-            self.len_conn = self.bolt.min_pitch_round + 2*self.bolt.min_end_dist_round
+            # Only one bolt can fit per row
+            max_bolts_per_row = 1
+
+        # Step 4: Calculate optimal rows and columns
+        if self.number_bolts <= max_bolts_per_row:
+            # All bolts fit in one row
+            self.rows = self.number_bolts
+            self.cols = 1
+        else:
+            # Need multiple columns (pitch direction)
+            self.rows = max_bolts_per_row
+            self.cols = math.ceil(self.number_bolts / self.rows)
+            # Rebalance to minimize empty spaces
+            self.rows = math.ceil(self.number_bolts / self.cols)
+
+        # Ensure minimum of 2 bolts
+        if self.rows * self.cols < 2:
+            self.rows = 2
+            self.cols = 1
+
+        # Step 5: Calculate actual gauge distance
+        if self.rows > 1:
+            actual_gauge = available_width / (self.rows - 1)
+        else:
+            actual_gauge = 0
+
+        # Step 6: Validate gauge against maximum spacing (Cl. 10.2.3.1)
+        if actual_gauge > max_gauge and self.rows > 1:
+            # Need more bolts per row to reduce gauge
+            required_rows = math.ceil(available_width / max_gauge) + 1
+            if required_rows > self.rows:
+                self.rows = required_rows
+                self.cols = math.ceil(self.number_bolts / self.rows)
+                self.number_bolts = self.rows * self.cols
+                actual_gauge = available_width / (self.rows - 1) if self.rows > 1 else 0
+
+        # Step 7: Calculate actual end distance
+        if self.rows > 1:
+            actual_end_dist = (plate_width - (self.rows - 1) * min_gauge) / 2
+        else:
+            actual_end_dist = plate_width / 2
+
+        # Step 8: Validate end distance against maximum (Cl. 10.2.4.3)
+        if actual_end_dist > max_end_dist:
+            self.logger.warning(f": End distance ({actual_end_dist:.1f} mm) exceeds maximum "
+                               f"({max_end_dist} mm) per Cl. 10.2.4.3. Adding more bolts.")
+            # Add more bolts to reduce end distance
+            required_rows = math.ceil((plate_width - 2 * max_end_dist) / min_gauge) + 1
+            if required_rows > self.rows:
+                self.rows = required_rows
+                self.cols = math.ceil(self.number_bolts / self.rows)
+                self.number_bolts = self.rows * self.cols
+
+        # Calculate connection length
+        if self.cols > 1:
+            self.len_conn = (self.cols - 1) * self.bolt.min_pitch_round + 2 * self.bolt.min_end_dist_round
+        else:
+            self.len_conn = self.bolt.min_pitch_round + 2 * self.bolt.min_end_dist_round
+
+        # Continue to capacity reduction checks
         if self.number_bolts >= 2 and count == 0:
             self.design_status = True
-            # print("Num bolts leaving",self.number_bolts)
             self.check_capacity_reduction_1(design_dictionary)
-        elif self.number_bolts>=2 and count == 1:
+        elif self.number_bolts >= 2 and count == 1:
             self.design_status = True
             self.final_formatting(design_dictionary)
         else:
             self.design_status = False
-            logger.error(": Number of min bolts not satisfied. \n ")
-            logger.info(" :=========End Of design===========")
+            self.logger.error(": Number of min bolts not satisfied. \n ")
+            self.logger.info(" :=========End Of design===========")
 
 
     def check_capacity_reduction_1(self,design_dictionary):
@@ -694,7 +829,7 @@ class LapJointBolted(MomentConnection):
         bolt_capacity_kN = self.bolt.bolt_capacity
         bolt_capacity_total = bolt_capacity_kN * self.number_bolts if bolt_capacity_kN else 0.0
         if bolt_capacity_total <= 0:
-            logger.error(": Bolt capacity is zero. Increase bolt size/grade or adjust layout.")
+            self.logger.error(": Bolt capacity is zero. Increase bolt size/grade or adjust layout.")
             self.design_status = False
             self.design_error = "Bolt capacity is zero."
             return
@@ -704,7 +839,7 @@ class LapJointBolted(MomentConnection):
             return
 
         if not self.base_metal_capacity_kN or self.base_metal_capacity_kN <= 0:
-            logger.error(": Base metal capacity is zero or undefined. Check plate selection.")
+            self.logger.error(": Base metal capacity is zero or undefined. Check plate selection.")
             self.design_status = False
             self.design_error = "Base metal capacity is zero or undefined."
             return
@@ -739,13 +874,13 @@ class LapJointBolted(MomentConnection):
 
 
     def check_base_metal_strength(self):
-        global logger
+        
         try:
-            logger
+            self.logger
         except NameError:
-            logger = logging.getLogger('Osdag')
+            self.logger = logging.getLogger('Osdag')
 
-        logger.info(": ============== Base Metal Strength Check ==============")
+        self.logger.info(": ============== Base Metal Strength Check ==============")
 
         plate_thk_min = min(float(self.plate1thk), float(self.plate2thk))
         fy = min(self.plate1.fy, self.plate2.fy)
@@ -758,14 +893,14 @@ class LapJointBolted(MomentConnection):
 
         if self.design_for == 'Compression':
             self.T_db = self.A_g * fy / self.gamma_m0
-            logger.info(f": Design strength of plate in compression = {self.T_db / 1000:.2f} kN [Cl.7.1.2]")
+            self.logger.info(f": Design strength of plate in compression = {self.T_db / 1000:.2f} kN [Cl.7.1.2]")
         else:
             n_holes = max(self.rows, 1)
             hole_dia = self.bolt.dia_hole if hasattr(self.bolt, 'dia_hole') else 0.0
             net_width = float(self.width) - n_holes * hole_dia
 
             if net_width <= 0:
-                logger.error(": Net width becomes zero/negative after deducting bolt holes. Increase plate width or reduce rows.")
+                self.logger.error(": Net width becomes zero/negative after deducting bolt holes. Increase plate width or reduce rows.")
                 self.design_status = False
                 self.design_error = "Net width insufficient for bolt holes."
                 return False
@@ -787,10 +922,10 @@ class LapJointBolted(MomentConnection):
 
             T_db_block = IS800_2007.cl_6_4_1_block_shear_strength(A_vg, A_vn, A_tg, A_tn, fu, fy)
             self.T_db = min(self.T_db, T_db_block)
-            logger.info(f": Design strength of plate in tension = {self.T_db / 1000:.2f} kN [Cl.6.2.2, 6.2.3, 6.3.3]")
+            self.logger.info(f": Design strength of plate in tension = {self.T_db / 1000:.2f} kN [Cl.6.2.2, 6.2.3, 6.3.3]")
 
         if self.T_db <= 0:
-            logger.error(": Plate design strength is non-positive. Check input dimensions/material.")
+            self.logger.error(": Plate design strength is non-positive. Check input dimensions/material.")
             self.design_status = False
             self.design_error = "Plate design strength is non-positive."
             return False
@@ -798,41 +933,49 @@ class LapJointBolted(MomentConnection):
         self.base_metal_capacity_kN = self.T_db / 1000.0
         return True
 
-
-    def call_3DColumn(self, ui, bgcolor):
-        # status = self.resultObj['Bolt']['status']
-        # if status is True:
-        #     self.ui.chkBx_beamSec1.setChecked(Qt.Checked)
-        if ui.chkBxCol.isChecked():
-            ui.btn3D.setChecked(Qt.Unchecked)
-            ui.chkBxCol.setChecked(Qt.Unchecked)
-            ui.mytabWidget.setCurrentIndex(0)
-        # self.display_3DModel("Beam", bgcolor)
-        ui.commLogicObj.display_3DModel("Column", bgcolor)
-
     def get_3d_components(self):
         components = []
 
         t1 = ('Model', self.call_3DModel)
         components.append(t1)
 
-        t3 = ('Plate1', self.call_3DColumn)
+        t2 = ('Plate 1', self.call_3DPlate1)
+        components.append(t2)
+
+        t3 = ('Plate 2', self.call_3DPlate2)
         components.append(t3)
 
-        t4 = ('Plate2', self.call_3DPlate)
+        t4 = ('Bolts', self.call_3DBolt)
         components.append(t4)
 
         return components
 
-    def call_3DPlate(self, ui, bgcolor):
-        from PyQt5.QtWidgets import QCheckBox
-        from PyQt5.QtCore import Qt
-        for chkbox in ui.frame.children():
-            if chkbox.objectName() == 'Cover Plate':
+    def call_3DPlate1(self, ui, bgcolor):
+        from PySide6.QtWidgets import QCheckBox
+        for chkbox in ui.cad_comp_widget.children():
+            if chkbox.objectName() == 'Plate 1':
                 continue
             if isinstance(chkbox, QCheckBox):
-                chkbox.setChecked(Qt.Unchecked)
-        ui.commLogicObj.display_3DModel("Cover Plate", bgcolor)
+                chkbox.setChecked(False)
+        ui.commLogicObj.display_3DModel("Plate 1", bgcolor)
+
+    def call_3DPlate2(self, ui, bgcolor):
+        from PySide6.QtWidgets import QCheckBox
+        for chkbox in ui.cad_comp_widget.children():
+            if chkbox.objectName() == 'Plate 2':
+                continue
+            if isinstance(chkbox, QCheckBox):
+                chkbox.setChecked(False)
+        ui.commLogicObj.display_3DModel("Plate 2", bgcolor)
+    
+    def call_3DBolt(self, ui, bgcolor):
+        from PySide6.QtWidgets import QCheckBox
+        for chkbox in ui.cad_comp_widget.children():
+            if chkbox.objectName() == 'Bolts':
+                continue
+            if isinstance(chkbox, QCheckBox):
+                chkbox.setChecked(False)
+        ui.commLogicObj.display_3DModel("Bolts", bgcolor)
     
     def warn_text(self):
 
@@ -841,13 +984,283 @@ class LapJointBolted(MomentConnection):
         """
 
         # @author Arsil Zunzunia
-        global logger
         red_list = red_list_function()
         if self.supported_section.designation in red_list or self.supporting_section.designation in red_list:
-            logger.warning(
+            self.logger.warning(
                 " : You are using a section (in red color) that is not available in latest version of IS 808")
-            logger.info(
+            self.logger.info(
                 " : You are using a section (in red color) that is not available in latest version of IS 808")
 
     def save_design(self, popup_summary):
-        logger.info("ADD THE CODE FOR REPORT AFTER THIS")
+        """
+        Generate the LaTeX design report for Lap Joint Bolted Connection (Tension/Compression)
+        per IS 800:2007.
+        """
+        import os
+        from pylatex.utils import NoEscape
+        
+        try:
+            # Helper functions
+            def g(attr, default=None):
+                v = getattr(self, attr, default)
+                return default if v is None else v
+            
+            def f2(x, default=0.0):
+                try:
+                    return round(float(x), 2)
+                except (TypeError, ValueError):
+                    return default
+            
+            def as_int(x, default=0):
+                try:
+                    return int(round(float(x)))
+                except (TypeError, ValueError):
+                    return default
+            
+            # Design status check
+            if not getattr(self, 'design_status', False):
+                self.report_input = {
+                    KEY_MODULE: "Lap Joint Bolted",
+                    KEY_MAIN_MODULE: "Lap Joint Bolted Connection",
+                    "Design Status": "TITLE",
+                    "Status": "Design not completed successfully."
+                }
+                self.report_check = []
+                self.report_check.append([
+                    "SubSection", "Design Status", "|p{2.5cm}|p{2cm}|p{8cm}|p{2.5cm}|"
+                ])
+                self.report_check.append(["Design", "Design not completed successfully.", "", "FAIL"])
+                
+                Disp_2d_image = []
+                Disp_3D_image = "/ResourceFiles/images/3d.png"
+                rel_path = os.path.abspath(".").replace("\\", "/")
+                
+                fname_no_ext = popup_summary.get("filename", "LapJointBoltedReport")
+                folder = popup_summary.get('folder', './reports')
+                os.makedirs(folder, exist_ok=True)
+                
+                CreateLatex.save_latex(
+                    CreateLatex(), self.report_input, self.report_check,
+                    popup_summary, fname_no_ext, rel_path, Disp_2d_image, Disp_3D_image,
+                    module=getattr(self, 'module', 'Lap Joint Bolted')
+                )
+                return True
+            
+            # Extract design values
+            self.module = g('module', 'Lap Joint Bolted')
+            self.mainmodule = 'Lap Joint Bolted Connection'
+            design_for = str(g('design_for', 'Tension')).strip()
+            is_comp = design_for.lower().startswith('c')
+            
+            # Geometry
+            plate1_thk = f2(g('plate1thk', g('pltthk', 0.0)), 0.0)
+            plate2_thk = f2(g('plate2thk', g('pltthk', 0.0)), 0.0)
+            width = f2(g('width', 0.0), 0.0)
+            
+            # Forces
+            axial_kN = f2(g('axial_force_kN', g('tensile_force', 0.0)), 0.0)
+            
+            # Bolts
+            bolt_dia_prov = f2(getattr(self.bolt, 'bolt_diameter_provided', 0.0) if hasattr(self, 'bolt') else 0.0, 0.0)
+            bolt_grade_prov = f2(getattr(self.bolt, 'bolt_grade_provided', 0.0) if hasattr(self, 'bolt') else 0.0, 0.0)
+            bolt_type = getattr(self.bolt, 'bolt_type', VALUE_NOT_APPLICABLE) if hasattr(self, 'bolt') else VALUE_NOT_APPLICABLE
+            
+            bolt_shear_kN = f2(getattr(self.bolt, 'bolt_shear_capacity', 0.0) if hasattr(self, 'bolt') else 0.0, 0.0)
+            bolt_bearing_kN = f2(getattr(self.bolt, 'bolt_bearing_capacity', 0.0) if hasattr(self, 'bolt') else 0.0, 0.0)
+            bolt_final_cap = f2(getattr(self.bolt, 'bolt_capacity', 0.0) if hasattr(self, 'bolt') else 0.0, 0.0)
+            
+            # Layout
+            rows = as_int(g('rows', 0), 0)
+            cols = as_int(g('cols', 0), 0)
+            n_bolts = as_int(g('number_bolts', 0), 0)
+            pitch = as_int(g('final_pitch', 0), 0)
+            gauge = f2(g('final_gauge', 0.0), 0.0)
+            e_dist = f2(g('final_edge_dist', 0.0), 0.0)
+            
+            # Spacing limits
+            p_min = as_int(getattr(self.bolt, 'min_pitch', 0) if hasattr(self, 'bolt') else 0, 0)
+            g_min = as_int(getattr(self.bolt, 'min_gauge', 0) if hasattr(self, 'bolt') else 0, 0)
+            e_min = f2(getattr(self.bolt, 'min_edge_dist', 0.0) if hasattr(self, 'bolt') else 0.0, 0.0)
+            e_max = f2(getattr(self.bolt, 'max_edge_dist', 0.0) if hasattr(self, 'bolt') else 0.0, 0.0)
+            
+            # Material properties
+            t_fu_fy_list = getattr(self, 'bolt_conn_plates_t_fu_fy', [])
+            if t_fu_fy_list and len(t_fu_fy_list) > 0:
+                fu = t_fu_fy_list[0][1] if len(t_fu_fy_list[0]) > 1 else 0
+                fy = t_fu_fy_list[0][2] if len(t_fu_fy_list[0]) > 2 else 0
+            else:
+                fy = g('yield_stress', 0)
+                fu = 0
+            
+            # Base metal
+            base_metal_capacity_kN = f2(g('base_metal_capacity_kN', 0.0), 0.0)
+            A_g = f2(g('A_g', 0.0), 0.0)
+            Tdg = f2(g('Tdg', 0.0), 0.0)
+            Tdn = f2(g('Tdn', 0.0), 0.0)
+            T_db = f2(g('T_db', 0.0), 0.0)
+            
+            # Utilization
+            overall_ur = round(g('utilization_ratio', 0.0), 3)
+            
+            # Bolt values for equations
+            bolt_fu = as_int(bolt_grade_prov * 100, 0)
+            bolt_net_area = f2(math.pi * (bolt_dia_prov ** 2) / 4, 0.0)
+            kb = f2(getattr(self.bolt, 'kb', 1.0) if hasattr(self, 'bolt') else 1.0, 1.0)
+            
+            # Build report input
+            self.report_input = {
+                KEY_MODULE: "Lap Joint Bolted Connection",
+                KEY_DISP_DESIGN_FOR: design_for,
+                "Material *": getattr(self, 'main_material', VALUE_NOT_APPLICABLE),
+                "Thickness of Plate-1 (mm) *": plate1_thk,
+                "Thickness of Plate-2 (mm) *": plate2_thk,
+                "Width of Plate (mm) *": width,
+                f"{'Tensile' if not is_comp else 'Axial'} Force (kN) *": axial_kN,
+                "Diameter (mm) *": bolt_dia_prov,
+                "Property Class *": bolt_grade_prov,
+                "Type *": bolt_type,
+            }
+            
+            # Build report check - FIXED COLUMN WIDTHS
+            self.report_check = []
+            
+            # Section 2.1: Bolt Capacity - NARROW "Required" column
+            self.report_check.append([
+                "SubSection", "Bolt Capacity Calculations", "|p{2.5cm}|p{2cm}|p{8cm}|p{2.5cm}|"
+            ])
+            
+            if bolt_type == TYP_BEARING:
+                shear_eq = NoEscape(
+                    r"$V_{dsb} = \frac{f_{ub} \times A_{sb}}{\gamma_{mb}}$" + "\n\n" +
+                    rf"$= \frac{{{bolt_fu} \times \pi \times {bolt_dia_prov}^2/4}}{{1.25}}$" + "\n\n" +
+                    rf"$= {bolt_shear_kN}$ kN" + "\n\n" +
+                    r"[Ref: Cl. 10.3.3, IS 800:2007]"
+                )
+                self.report_check.append(["Bolt Shear Capacity", "", shear_eq, ""])
+                
+                t_plate = min(plate1_thk, plate2_thk) if plate1_thk > 0 and plate2_thk > 0 else plate1_thk
+                bearing_eq = NoEscape(
+                    r"$V_{dpb} = \frac{2.5 \times k_b \times d \times t \times f_u}{\gamma_{mb}}$" + "\n\n" +
+                    rf"$= \frac{{2.5 \times {kb} \times {bolt_dia_prov} \times {t_plate} \times {fu}}}{{1.25}}$" + "\n\n" +
+                    rf"$= {bolt_bearing_kN}$ kN" + "\n\n" +
+                    r"[Ref: Cl. 10.3.4, IS 800:2007]"
+                )
+                self.report_check.append(["Bolt Bearing Capacity", "", bearing_eq, ""])
+            
+            bolt_cap_eq = NoEscape(
+                r"$V_{db} = \min(V_{dsb}, V_{dpb})$" + "\n\n" +
+                rf"$= \min({bolt_shear_kN}, {bolt_bearing_kN})$" + "\n\n" +
+                rf"$= {bolt_final_cap}$ kN"
+            )
+            self.report_check.append(["Bolt Design Capacity", "", bolt_cap_eq, ""])
+            
+            # Section 2.2: Number of Bolts
+            self.report_check.append([
+                "SubSection", "Number of Bolts Required", "|p{2.5cm}|p{2cm}|p{8cm}|p{2.5cm}|"
+            ])
+            
+            bolts_req = as_int(axial_kN / bolt_final_cap if bolt_final_cap > 0 else 0, 0)
+            bolts_eq = NoEscape(
+                r"$n = \frac{P}{V_{db}}$" + "\n\n" +
+                rf"$= \frac{{{axial_kN}}}{{{bolt_final_cap}}}$" + "\n\n" +
+                rf"$= {bolts_req}$ nos."
+            )
+            self.report_check.append(["Bolts Required", "", bolts_eq, ""])
+            
+            # Section 2.3: Bolt Arrangement
+            self.report_check.append([
+                "SubSection", "Bolt Arrangement", "|p{2.5cm}|p{2cm}|p{8cm}|p{2.5cm}|"
+            ])
+            
+            self.report_check.append([
+                "Bolt Pattern", "", f"Arrangement: {rows} rows × {cols} columns", ""
+            ])
+            
+            # Section 2.4: Detailing Requirements
+            self.report_check.append([
+                "SubSection", "Detailing Requirements", "|p{2.5cm}|p{4cm}|p{6cm}|p{2.5cm}|"
+            ])
+            
+            spacing_req = NoEscape(
+                rf"$p_{{\min}} = 2.5d = {p_min}$ mm" + "\n\n" +
+                rf"$g_{{\min}} = 2.5d = {g_min}$ mm" + "\n\n" +
+                r"[Cl. 10.2.2]"
+            )
+            spacing_prov = NoEscape(
+                rf"$p_{{prov}} = {pitch}$ mm" + "\n\n" +
+                rf"$g_{{prov}} = {gauge}$ mm"
+            )
+            self.report_check.append(["Minimum Spacing", spacing_req, spacing_prov, "PASS"])
+            
+            edge_req = NoEscape(
+                rf"$e_{{\min}} = {e_min}$ mm" + "\n\n" +
+                rf"$e_{{\max}} = {e_max}$ mm" + "\n\n" +
+                r"[Cl. 10.2.4]"
+            )
+            edge_prov = NoEscape(rf"$e_{{prov}} = {e_dist}$ mm")
+            self.report_check.append(["Edge Distance", edge_req, edge_prov, "PASS"])
+            
+            # Section 2.5: Base Metal Strength
+            self.report_check.append([
+                "SubSection", "Base Metal Strength", "|p{3cm}|p{2cm}|p{7cm}|p{2.5cm}|"
+            ])
+            
+            if is_comp:
+                comp_eq = NoEscape(
+                    r"$P_d = \frac{A_g \times f_y}{\gamma_{m0}}$" + "\n\n" +
+                    rf"$= \frac{{{A_g:.1f} \times {fy}}}{{1.1}} = {base_metal_capacity_kN:.2f}$ kN" + "\n\n" +
+                    r"[Cl. 7.1.2]"
+                )
+                self.report_check.append([
+                    "Compression", "", comp_eq, "PASS" if base_metal_capacity_kN >= axial_kN else "FAIL"
+                ])
+            else:
+                if Tdg > 0 and Tdn > 0:
+                    ten_eq = NoEscape(
+                        rf"$T_{{dg}} = {Tdg:.2f}$ kN (Gross yielding)" + "\n\n" +
+                        rf"$T_{{dn}} = {Tdn:.2f}$ kN (Net rupture)" + "\n\n" +
+                        rf"$T_d = {T_db:.2f}$ kN" + "\n\n" +
+                        r"[Cl. 6.2, 6.3]"
+                    )
+                else:
+                    ten_eq = NoEscape(rf"$T_d = {base_metal_capacity_kN:.2f}$ kN" + "\n\n" + r"[Cl. 6.2/6.3]")
+                
+                self.report_check.append([
+                    "Tension", "", ten_eq, "PASS" if base_metal_capacity_kN >= axial_kN else "FAIL"
+                ])
+            
+            # Section 2.6: Design Summary
+            self.report_check.append([
+                "SubSection", "Design Summary", "|p{2.5cm}|p{2cm}|p{8cm}|p{2.5cm}|"
+            ])
+            
+            total_capacity = f2(bolt_final_cap * n_bolts, 0.0)
+            ur_eq = NoEscape(
+                r"$UR = \frac{\text{Applied Force}}{\text{Design Capacity}}$" + "\n\n" +
+                rf"$= \frac{{{axial_kN}}}{{{total_capacity}}} = {overall_ur}$"
+            )
+            self.report_check.append(["Utilization Ratio", "", ur_eq, ""])
+            
+            design_status_str = "Design is SAFE" if overall_ur <= 1.0 else "Design is UNSAFE"
+            self.report_check.append([
+                "Design Status", "", design_status_str, "PASS" if overall_ur <= 1.0 else "FAIL"
+            ])
+            
+            Disp_2d_image = []
+            Disp_3D_image = "/ResourceFiles/images/3d.png"
+            rel_path = os.path.abspath(".").replace("\\", "/")
+            fname_no_ext = popup_summary.get("filename", "LapJointBoltedReport")
+            folder = popup_summary.get('folder', './reports')
+            os.makedirs(folder, exist_ok=True)
+            
+            CreateLatex.save_latex(
+                CreateLatex(), self.report_input, self.report_check,
+                popup_summary, fname_no_ext, rel_path, Disp_2d_image, Disp_3D_image,
+                module=self.module
+            )
+            self.logger.info(f"Report generated successfully: {fname_no_ext}.pdf")
+            return True
+            
+        except Exception as e:
+            print(f"CRITICAL ERROR in save_design(): {e}")
+            return False

@@ -4,6 +4,10 @@ from ..utils.common.component import *
 from ..utils.common.Section_Properties_Calculator import *
 from .main import Main
 from ..utils.common.Unsymmetrical_Section_Properties import Unsymmetrical_I_Section_Properties
+from PySide6 import QtWidgets
+from PySide6.QtWidgets import QCheckBox
+from PySide6.QtCore import Qt
+
 
 class Member(Main):
 
@@ -13,10 +17,10 @@ class Member(Main):
     ########################################
     # Design Preference Functions Start
     ########################################
-    def df_conn_image(self):
+    def df_conn_image(self, input):
 
         "Function to populate section size based on the type of section "
-        img = self[0]
+        img = input[0]
         if img == VALUES_SEC_PROFILE_2[0]:
             return VALUES_IMG_TENSIONBOLTED[0]
         elif img == VALUES_SEC_PROFILE_2[1]:
@@ -29,8 +33,9 @@ class Member(Main):
             return VALUES_IMG_TENSIONBOLTED[4]
 
 
-    def tab_angle_section(self, input_dictionary):
-        print(f"tab_angle_section input_dictionary {input_dictionary}")
+    def tab_angle_section(self, input_dictionary, debug=False):
+        if debug:
+            print(f"tab_angle_section input_dictionary {input_dictionary}")
         "In design preference, it shows other properties of section used "
         "In design preference, it shows other properties of section used "
         if not input_dictionary or input_dictionary[KEY_SECSIZE] == [] or \
@@ -73,7 +78,7 @@ class Member(Main):
             t_e = "12"
             image = ''
         else:
-            print(f'tab_angle_section input_dictionary{input_dictionary}')
+            # print(f'tab_angle_section input_dictionary{input_dictionary}')
             designation = str(input_dictionary[KEY_SECSIZE][0])
             material_grade = str(input_dictionary[KEY_MATERIAL])
             section_profile = str(input_dictionary[KEY_SEC_PROFILE])
@@ -124,7 +129,8 @@ class Member(Main):
 
             else:
                 if section_profile == "Back to Back Angles":
-                    print(section_profile, "hjcxhf")
+                    if debug:
+                        print(section_profile, "hjcxhf")
                     Angle_attributes = BBAngle_Properties()
                     Angle_attributes.data(designation, material_grade)
                     if l == "Long Leg":
@@ -269,7 +275,7 @@ class Member(Main):
         t12 = ('Label_5', KEY_DISP_TOE_R, TYPE_TEXTBOX, None, toe_radius)
         section.append(t12)
 
-        if KEY_MODULE in input_dictionary and input_dictionary[KEY_MODULE] == KEY_DISP_COMPRESSION_Strut:
+        if KEY_MODULE in input_dictionary and input_dictionary[KEY_MODULE] == KEY_DISP_STRUT_WELDED_END_GUSSET:
             t12 = ('Label_0', KEY_DISP_DPPLATETHK, TYPE_COMBOBOX, PLATE_THICKNESS_IS_1730_1989, plate_thk)
         else:
             t12 = ('Label_0', KEY_DISP_DPPLATETHK, TYPE_COMBOBOX, VALUES_PLATETHK_CUSTOMIZED, plate_thk)
@@ -351,8 +357,9 @@ class Member(Main):
 
         return section
 
-    def tab_strut_angle_section(self, input_dictionary):
-        print(f"tab_angle_section input_dictionary {input_dictionary}")
+    def tab_strut_angle_section(self, input_dictionary, debug=False):
+        if debug:
+            print(f"tab_angle_section input_dictionary {input_dictionary}")
         "In design preference, it shows other properties of section used "
         "In design preference, it shows other properties of section used "
         if not input_dictionary or input_dictionary[KEY_SECSIZE] == [] or \
@@ -395,7 +402,7 @@ class Member(Main):
             t_e = "12"
             image = ''
         else:
-            print(f'tab_angle_section input_dictionary{input_dictionary}')
+            # print(f'tab_angle_section input_dictionary{input_dictionary}')
             designation = str(input_dictionary[KEY_SECSIZE][0])
             material_grade = str(input_dictionary[KEY_MATERIAL])
             section_profile = str(input_dictionary[KEY_SEC_PROFILE])
@@ -446,7 +453,8 @@ class Member(Main):
 
             else:
                 if section_profile == Profile_name_3:
-                    print(section_profile, "hjcxhf")
+                    if debug:
+                        print(section_profile, "hjcxhf")
                     Angle_attributes = BBAngle_Properties()
                     Angle_attributes.data(designation, material_grade)
                     if l == "Long Leg":
@@ -479,7 +487,8 @@ class Member(Main):
                     plast_sec_mod_y = str(Angle_attributes.calc_PlasticModulusZpy(a, b, thickness, l, plate_thk))
                     torsional_rigidity = str(Angle_attributes.calc_TorsionConstantIt(a, b, thickness, l))
                 elif section_profile == Profile_name_2:
-                    print(section_profile, "hjcxhf")
+                    if debug:
+                        print(section_profile, "hjcxhf")
                     Angle_attributes = BBAngle_Properties()
                     Angle_attributes.data(designation, material_grade)
                     if l == "Long Leg":
@@ -624,7 +633,7 @@ class Member(Main):
         t12 = ('Label_5', KEY_DISP_TOE_R, TYPE_TEXTBOX, None, toe_radius)
         section.append(t12)
 
-        # if KEY_MODULE in input_dictionary and input_dictionary[KEY_MODULE] == KEY_DISP_COMPRESSION_Strut:
+        # if KEY_MODULE in input_dictionary and input_dictionary[KEY_MODULE] == KEY_DISP_STRUT_WELDED_END_GUSSET:
         #     t12 = ('Label_0', KEY_DISP_DPPLATETHK, TYPE_COMBOBOX, PLATE_THICKNESS_IS_1730_1989, plate_thk)
         # else:
         #     t12 = ('Label_0', KEY_DISP_DPPLATETHK, TYPE_COMBOBOX, VALUES_PLATETHK_CUSTOMIZED, plate_thk)
@@ -968,13 +977,13 @@ class Member(Main):
         return section
 
 
-    def get_new_angle_section_properties(self):
+    def get_new_angle_section_properties(self, input):
 
-        designation = self[0]
-        material_grade = self[1]
-        l = self[3][KEY_LOCATION]
-        section_profile = self[3][KEY_SEC_PROFILE]
-        plate_thk = float(self[2])
+        designation = input[0]
+        material_grade = input[1]
+        l = input[3][KEY_LOCATION]
+        section_profile = input[3][KEY_SEC_PROFILE]
+        plate_thk = float(input[2])
         Angle_attributes = Angle(designation, material_grade)
         source = str(Angle_attributes.source)
         fu = str(Angle_attributes.fu)
@@ -1373,18 +1382,18 @@ class Member(Main):
         section.append(t27)
 
         return section
-    def get_strut_angle_section_properties(self):
+    def get_strut_angle_section_properties(self, input):
         print(f" get_strut_angle_section_properties\n"
               f" self {self} \n"
-              f" designation {self[0]}\n"
-              f" {self[1]}\n"
-              f"{self[2]}\n"
-              f"{self[3]}\n")
-        designation = self[0]
-        material_grade = self[1]
-        l = self[2][KEY_LOCATION]
-        section_profile = self[2][KEY_SEC_PROFILE]
-        plate_thk = float(self[2][KEY_PLATETHK])
+              f" designation {input[0]}\n"
+              f" {input[1]}\n"
+              f"{input[2]}\n"
+              f"{input[3]}\n")
+        designation = input[0]
+        material_grade = input[1]
+        l = input[2][KEY_LOCATION]
+        section_profile = input[2][KEY_SEC_PROFILE]
+        plate_thk = float(input[2][KEY_PLATETHK])
         Angle_attributes = Angle(designation, material_grade)
         source = str(Angle_attributes.source)
         fu = str(Angle_attributes.fu)
@@ -1557,7 +1566,7 @@ class Member(Main):
         }
         return d
 
-    def get_Strut_Angle_sec_properties(self):
+    def get_Strut_Angle_sec_properties(self, input):
         print(f" get_Strut_Angle_sec_properties \n self{self}")
         if '' in self:
             mass = ''
@@ -1579,14 +1588,14 @@ class Member(Main):
             I_t = ''
             image = ''
         else:
-            a = float(self[0])
-            b = float(self[1])
-            t = float(self[2])
-            plate_thk = float(self[3][KEY_PLATETHK][0])
-            # plate_thk = float(self[3])
+            a = float(input[0])
+            b = float(input[1])
+            t = float(input[2])
+            plate_thk = float(input[3][KEY_PLATETHK][0])
+            # plate_thk = float(input[3])
 
-            l = self[3][KEY_LOCATION]
-            p = self[3][KEY_SEC_PROFILE]
+            l = input[3][KEY_LOCATION]
+            p = input[3][KEY_SEC_PROFILE]
 
             if p == "Angles":
                 sec_prop = Single_Angle_Properties()
@@ -1698,13 +1707,13 @@ class Member(Main):
 
         return d
 
-    def get_new_channel_section_properties(self):
-        designation = self[0]
-        material_grade = self[1]
-        # sl = self[2]
-        l = self[3][KEY_LOCATION]
-        section_profile = self[3][KEY_SEC_PROFILE]
-        plate_thk = float(self[2])
+    def get_new_channel_section_properties(self, input):
+        designation = input[0]
+        material_grade = input[1]
+        # sl = input[2]
+        l = input[3][KEY_LOCATION]
+        section_profile = input[3][KEY_SEC_PROFILE]
+        plate_thk = float(input[2])
         Channel_attributes = Channel(designation, material_grade)
         source = str(Channel_attributes.source)
         Type = str(Channel_attributes.type)
@@ -1795,7 +1804,7 @@ class Member(Main):
         }
         return d
 
-    def get_Angle_sec_properties(self):
+    def get_Angle_sec_properties(self, input):
         if '' in self:
             mass = ''
             area = ''
@@ -1816,14 +1825,14 @@ class Member(Main):
             I_t = ''
             image = ''
         else:
-            a = float(self[0])
-            b = float(self[1])
-            t = float(self[2])
-            # plate_thk = float(self[3][KEY_PLATETHK][0])
-            plate_thk = float(self[3])
+            a = float(input[0])
+            b = float(input[1])
+            t = float(input[2])
+            # plate_thk = float(input[3][KEY_PLATETHK][0])
+            plate_thk = float(input[3])
 
-            l = self[4][KEY_LOCATION]
-            p = self[4][KEY_SEC_PROFILE]
+            l = input[4][KEY_LOCATION]
+            p = input[4][KEY_SEC_PROFILE]
 
             if p == "Angles":
                 sec_prop = Single_Angle_Properties()
@@ -1935,7 +1944,7 @@ class Member(Main):
 
         return d
 
-    def get_Channel_sec_properties(self):
+    def get_Channel_sec_properties(self, input):
 
         if '' in self:
             mass = ''
@@ -1957,14 +1966,14 @@ class Member(Main):
             image =''
 
         else:
-            f_w = float(self[0])
-            f_t = float(self[1])
-            w_h = float(self[2])
-            w_t = float(self[3])
-            sl = float(self[4])
-            plate_thk = float(self[5][KEY_PLATETHK][0])
-            l = self[5][KEY_LOCATION]
-            p = self[5][KEY_SEC_PROFILE]
+            f_w = float(input[0])
+            f_t = float(input[1])
+            w_h = float(input[2])
+            w_t = float(input[3])
+            sl = float(input[4])
+            plate_thk = float(input[5][KEY_PLATETHK][0])
+            l = input[5][KEY_LOCATION]
+            p = input[5][KEY_SEC_PROFILE]
 
             if p =="Channels":
                 sec_prop = Single_Channel_Properties()
@@ -2381,9 +2390,9 @@ class Member(Main):
         return section
 
 
-    def get_fu_fy_I_section(self):
-        material_grade = self[0]
-        designation = self[1][KEY_SECSIZE]
+    def get_fu_fy_I_section(self, input):
+        material_grade = input[0]
+        designation = input[1][KEY_SECSIZE]
 
         fu = ''
         fy = ''
@@ -2405,11 +2414,11 @@ class Member(Main):
 
         return d
 
-    def get_fu_fy_section(self):
-        material_grade = self[0]
-        designation = self[2][KEY_SECSIZE_SELECTED]
-        # designation = self[1][KEY_SECSIZE][0]
-        profile = self[1][KEY_SEC_PROFILE]
+    def get_fu_fy_section(self, input):
+        material_grade = input[0]
+        designation = input[2][KEY_SECSIZE_SELECTED]
+        # designation = input[1][KEY_SECSIZE][0]
+        profile = input[1][KEY_SEC_PROFILE]
 
         if material_grade != "Select Material" and designation != "":
             if profile in ['Angles', 'Back to Back Angles', 'Star Angles']:
@@ -2450,8 +2459,8 @@ class Member(Main):
 
         return d
 
-    def get_fu_fy(self):
-        material_grade = self[0]
+    def get_fu_fy(self, input):
+        material_grade = input[0]
 
         if material_grade != "Select Material":
             m_conn = Material(material_grade)
@@ -2498,17 +2507,17 @@ class Member(Main):
 
         return edit_list
 
-    def get_selected_tab(self):
+    def get_selected_tab(self, arg):
         """
 
         :return: This function have key value passed in self. This return name of the tab selected
         based on the value of the key passed.
         """
-        if self in ['Angles', 'Back to Back Angles', 'Star Angles']:
+        if arg in ['Angles', 'Back to Back Angles', 'Star Angles']:
             return DISP_TITLE_ANGLE
-        elif self in [ 'Channels', 'Back to Back Channels']:
+        elif arg in [ 'Channels', 'Back to Back Channels']:
             return DISP_TITLE_CHANNEL
-        elif self in['Beams']:
+        elif arg in['Beams']:
             return KEY_DISP_BEAMSEC
         else:
             return KEY_DISP_COLSEC
@@ -2953,24 +2962,78 @@ class Member(Main):
 
 
     def tab_girder_sec(self, input_dictionary):
-       
-
-        #initialize variables
+        """
+        Create the Girder Section tab for design preferences.
+        Values are synced from the main input dock when available.
+        
+        Args:
+            input_dictionary: Dictionary containing current input values from main dock
+        """
+        # Get material info from database
         material = connectdb("Material", call_type="popup")
-        material_grade = material[1]
-        mat = Material(material_grade,41)
-        fu = mat.fu #material fu
-        fy = mat.fy #material fy
-        m_o_e = 200
-        m_o_r = 76.9
-        p_r = 0.3
-        t_e = 12
-        tot_depth = '750'
-        web_thickness = '10'
-        top_flange_width = '300'
-        top_flange_thickness = '15'
-        bottom_flange_width = '400'
-        bottom_flange_thickness = '20'
+        
+        # Use material from input_dictionary if available, otherwise use database default
+        if KEY_MATERIAL in input_dictionary and input_dictionary[KEY_MATERIAL] not in ['', None, 'Select Material']:
+            material_grade = input_dictionary[KEY_MATERIAL]
+        else:
+            material_grade = material[1]
+        
+        # Get web thickness for proper thickness-dependent Fy calculation
+        if KEY_WEB_THICKNESS_PG in input_dictionary and input_dictionary[KEY_WEB_THICKNESS_PG]:
+            web_thk_list = input_dictionary[KEY_WEB_THICKNESS_PG]
+            if isinstance(web_thk_list, list) and len(web_thk_list) > 0:
+                web_thickness = str(web_thk_list[0])
+                thickness_for_mat = float(web_thk_list[0])
+            else:
+                web_thickness = str(web_thk_list) if web_thk_list else '10'
+                thickness_for_mat = float(web_thk_list) if web_thk_list else 20
+        else:
+            web_thickness = '10'
+            thickness_for_mat = 20
+        
+        mat = Material(material_grade, thickness_for_mat)
+        fu = mat.fu
+        fy = mat.fy
+        m_o_e = 200  # Modulus of Elasticity (GPa)
+        m_o_r = 76.9  # Modulus of Rigidity (GPa)
+        p_r = 0.3  # Poisson's Ratio
+        t_e = 12  # Thermal Expansion (×10⁻⁶/°C)
+        
+        # Get dimensions from input_dictionary if available, otherwise use defaults
+        if KEY_OVERALL_DEPTH_PG in input_dictionary and input_dictionary[KEY_OVERALL_DEPTH_PG]:
+            tot_depth = str(input_dictionary[KEY_OVERALL_DEPTH_PG])
+        else:
+            tot_depth = '750'
+        
+        if KEY_TOP_Bflange_PG in input_dictionary and input_dictionary[KEY_TOP_Bflange_PG]:
+            top_flange_width = str(input_dictionary[KEY_TOP_Bflange_PG])
+        else:
+            top_flange_width = '300'
+        
+        if KEY_TOP_FLANGE_THICKNESS_PG in input_dictionary and input_dictionary[KEY_TOP_FLANGE_THICKNESS_PG]:
+            tf_top_list = input_dictionary[KEY_TOP_FLANGE_THICKNESS_PG]
+            if isinstance(tf_top_list, list) and len(tf_top_list) > 0:
+                top_flange_thickness = str(tf_top_list[0])
+            else:
+                top_flange_thickness = str(tf_top_list) if tf_top_list else '15'
+        else:
+            top_flange_thickness = '15'
+        
+        if KEY_BOTTOM_Bflange_PG in input_dictionary and input_dictionary[KEY_BOTTOM_Bflange_PG]:
+            bottom_flange_width = str(input_dictionary[KEY_BOTTOM_Bflange_PG])
+        else:
+            bottom_flange_width = '400'
+        
+        if KEY_BOTTOM_FLANGE_THICKNESS_PG in input_dictionary and input_dictionary[KEY_BOTTOM_FLANGE_THICKNESS_PG]:
+            tf_bot_list = input_dictionary[KEY_BOTTOM_FLANGE_THICKNESS_PG]
+            if isinstance(tf_bot_list, list) and len(tf_bot_list) > 0:
+                bottom_flange_thickness = str(tf_bot_list[0])
+            else:
+                bottom_flange_thickness = str(tf_bot_list) if tf_bot_list else '20'
+        else:
+            bottom_flange_thickness = '20'
+        
+        # Initialize section property values (will be calculated by Unsymm_I_Section_properties)
         mass = '' 
         area = '' 
         mom_inertia_z = '' 
@@ -2983,7 +3046,9 @@ class Member(Main):
         plast_sec_mod_y = '' 
         torsion_const = '' 
         warping_const = '' 
-        image = VALUES_IMG_BEAM[0]    #just any image put into the place just to check
+        image = VALUES_IMG_BEAM[0]
+
+
 
 
 
@@ -3118,13 +3183,19 @@ class Member(Main):
     # Design Preference Functions End
     ########################################
 
-    def get_fu_fy_I_section_plate_girder(self):
-        material_grade = self[0]
+    def get_fu_fy_I_section_plate_girder(self, input):
+        material_grade = input[0]
+        # Get web thickness from input if available, default to 20mm for consistent behavior
+        try:
+            web_thickness = float(input[1]) if len(input) > 1 and input[1] else 20
+        except (ValueError, TypeError):
+            web_thickness = 20
 
         fu = ''
         fy = ''
         if material_grade != "Select Material":
-            material = Material(material_grade, 41)
+            # Use actual web thickness for thickness-dependent Fy per IS 2062
+            material = Material(material_grade, web_thickness)
             fu = material.fu
             fy = material.fy
         else:
@@ -3136,7 +3207,18 @@ class Member(Main):
 
         return d
     
-    def Unsymm_I_Section_properties(self):
+    def Unsymm_I_Section_properties(self, input):
+        """
+        Calculate section properties for unsymmetrical I-sections.
+        
+        Args:
+            input: List containing [total_depth, web_thickness, top_flange_width, 
+                   top_flange_thickness, bottom_flange_width, bottom_flange_thickness, fy]
+        
+        Returns:
+            Dictionary with calculated section properties for Labels 12-23
+        """
+        # Initialize with empty strings for return values
         mass = '' 
         area = '' 
         mom_inertia_z = '' 
@@ -3150,47 +3232,78 @@ class Member(Main):
         torsion_const = '' 
         warping_const = '' 
 
-        t_d = float(self[0])
-        w_t = float(self[1])
-        t_f_w = float(self[2])
-        t_f_t = float(self[3])
-        b_f_w = float(self[4])
-        b_f_t = float(self[5])
+        try:
+            # Validate input
+            if not input or len(input) < 6:
+                return {
+                    'Label_12': mass, 'Label_13': area,
+                    'Label_14': mom_inertia_z, 'Label_15': mom_inertia_y,
+                    'Label_16': rad_of_gy_z, 'Label_17': rad_of_gy_y,
+                    'Label_18': elast_sec_mod_z, 'Label_19': elast_sec_mod_y,
+                    'Label_20': plast_sec_mod_z, 'Label_21': plast_sec_mod_y,
+                    'Label_22': torsion_const, 'Label_23': warping_const
+                }
+            
+            # Check if all required values are non-empty
+            for i in range(6):
+                if input[i] == '' or input[i] is None:
+                    return {
+                        'Label_12': mass, 'Label_13': area,
+                        'Label_14': mom_inertia_z, 'Label_15': mom_inertia_y,
+                        'Label_16': rad_of_gy_z, 'Label_17': rad_of_gy_y,
+                        'Label_18': elast_sec_mod_z, 'Label_19': elast_sec_mod_y,
+                        'Label_20': plast_sec_mod_z, 'Label_21': plast_sec_mod_y,
+                        'Label_22': torsion_const, 'Label_23': warping_const
+                    }
 
-        pc = Unsymmetrical_I_Section_Properties()
+            # Parse input values
+            # Input order from tab_value_changed: Label_6=depth, Label_7=web_thk, Label_8=top_flange_width,
+            # Label_9=top_flange_thk, Label_10=bot_flange_width, Label_11=bot_flange_thk
+            print(f"Unsymm_I_Section_properties inputs: {input}")
+            t_d = float(input[0])      # Total depth
+            w_t = float(input[1])      # Web thickness
+            t_f_w = float(input[2])    # Top flange width
+            t_f_t = float(input[3])    # Top flange thickness
+            b_f_w = float(input[4])    # Bottom flange width
+            b_f_t = float(input[5])    # Bottom flange thickness
 
-        mass = pc.calc_mass(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        area = pc.calc_area(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        mom_inertia_z = pc.calc_MomentOfAreaZ(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        mom_inertia_y = pc.calc_MomentOfAreaY(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        rad_of_gy_z = pc.calc_RadiusOfGyrationZ(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        rad_of_gy_y = pc.calc_RadiusOfGyrationY(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        elast_sec_mod_z = pc.calc_ElasticModulusZz(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        elast_sec_mod_y = pc.calc_ElasticModulusZy(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        plast_sec_mod_z = pc.calc_PlasticModulusZ(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        plast_sec_mod_y = pc.calc_PlasticModulusY(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        torsion_const = pc.calc_TorsionConstantIt(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
-        warping_const = pc.calc_WarpingConstantIw(t_d,t_f_w,b_f_w,w_t,t_f_t,b_f_t)
+            pc = Unsymmetrical_I_Section_Properties()
+
+            mass = pc.calc_mass(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            area = pc.calc_area(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            mom_inertia_z = pc.calc_MomentOfAreaZ(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            mom_inertia_y = pc.calc_MomentOfAreaY(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            rad_of_gy_z = pc.calc_RadiusOfGyrationZ(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            rad_of_gy_y = pc.calc_RadiusOfGyrationY(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            elast_sec_mod_z = pc.calc_ElasticModulusZz(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            elast_sec_mod_y = pc.calc_ElasticModulusZy(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            plast_sec_mod_z = pc.calc_PlasticModulusZ(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            plast_sec_mod_y = pc.calc_PlasticModulusY(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            torsion_const = pc.calc_TorsionConstantIt(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            warping_const = pc.calc_WarpingConstantIw(t_d, t_f_w, b_f_w, w_t, t_f_t, b_f_t)
+            print(f"  Calculated: mass={mass}, area={area}, Izz={mom_inertia_z}, Iyy={mom_inertia_y}, Zez={elast_sec_mod_z}, Zpz={plast_sec_mod_z}")
+
+        except (ValueError, TypeError, IndexError) as e:
+            # If any conversion fails, return empty values
+            pass
 
 
 
 
+        return {'Label_12': str(mass),
+                'Label_13': str(area),
+                'Label_14': str(mom_inertia_z),
+                'Label_15': str(mom_inertia_y),
+                'Label_16': str(rad_of_gy_z),
+                'Label_17': str(rad_of_gy_y),
+                'Label_18': str(elast_sec_mod_z),
+                'Label_19': str(elast_sec_mod_y),
+                'Label_20': str(plast_sec_mod_z),
+                'Label_21': str(plast_sec_mod_y),
+                'Label_22': str(torsion_const),
+                'Label_23': str(warping_const)
+        }
 
-
-
-        return {'Label_11': str(mass),
-                'Label_12': str(area),
-                'Label_13': str(mom_inertia_z),
-                'Label_14': str(mom_inertia_y),
-                'Label_15': str(rad_of_gy_z),
-                'Label_16': str(rad_of_gy_y),
-                'Label_17': str(elast_sec_mod_z),
-                'Label_18': str(elast_sec_mod_y),
-                'Label_19': str(plast_sec_mod_z),
-                'Label_20': str(plast_sec_mod_y),
-                'Label_21': str(torsion_const),
-                'Label_22': str(warping_const)
-}
 
 
     @staticmethod
@@ -3232,9 +3345,9 @@ class Member(Main):
         #     self.supporting_section = Beam(designation=design_dictionary[KEY_SUPTNGSEC], material_grade=design_dictionary[KEY_MATERIAL])
 
 
-    def new_material(self):
+    def new_material(self, input):
 
-        selected_material = self[0]
+        selected_material = input[0]
         if selected_material in ["Custom","Custom Section"]:
             return True
         else:
@@ -3255,38 +3368,35 @@ class Member(Main):
         t2 = ('Plate', self.call_3DPlate)
         components.append(t2)
 
-        t3 = ('Endplate', self.call_3DEndplate)
-        components.append(t3)
+        # t3 = ('Endplate', self.call_3DEndplate)
+        # components.append(t3)
 
         return components
 
     def call_3DPlate(self, ui, bgcolor):
-        from PyQt5.QtWidgets import QCheckBox
-        from PyQt5.QtCore import Qt
-        for chkbox in ui.frame.children():
+        
+        for chkbox in ui.findChildren(QtWidgets.QCheckBox):
             if chkbox.objectName() == 'Plate':
                 continue
             if isinstance(chkbox, QCheckBox):
-                chkbox.setChecked(Qt.Unchecked)
+                chkbox.setChecked(False)
         ui.commLogicObj.display_3DModel("Plate", bgcolor)
 
     def call_3DMember(self, ui, bgcolor):
-        from PyQt5.QtWidgets import QCheckBox
-        from PyQt5.QtCore import Qt
-        for chkbox in ui.frame.children():
+      
+        for chkbox in ui.findChildren(QtWidgets.QCheckBox):
             if chkbox.objectName() == 'Member':
                 continue
             if isinstance(chkbox, QCheckBox):
-                chkbox.setChecked(Qt.Unchecked)
+                chkbox.setChecked(False)
         ui.commLogicObj.display_3DModel("Member", bgcolor)
 
 
     def call_3DEndplate(self, ui, bgcolor):
-        from PyQt5.QtWidgets import QCheckBox
-        from PyQt5.QtCore import Qt
-        for chkbox in ui.frame.children():
+       
+        for chkbox in ui.findChildren(QtWidgets.QCheckBox):
             if chkbox.objectName() == 'Endplate':
                 continue
             if isinstance(chkbox, QCheckBox):
-                chkbox.setChecked(Qt.Unchecked)
+                chkbox.setChecked(False)
         ui.commLogicObj.display_3DModel("Endplate", bgcolor)

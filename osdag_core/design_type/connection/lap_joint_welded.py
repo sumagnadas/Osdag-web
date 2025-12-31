@@ -19,11 +19,10 @@ from ...Common import *
 from ...design_report.reportGenerator_latex import CreateLatex
 from ...Report_functions import *
 from ...utils.common.load import Load
+from ...custom_logger import CustomLogger
 import logging
 
 import math
-
-from PyQt5.QtCore import Qt
 
 class LapJointWelded(MomentConnection):
     def __init__(self):
@@ -41,8 +40,6 @@ class LapJointWelded(MomentConnection):
         self.weld_fabrication = None
         self.weld_angle = None
         self.weld_length_effective = None
-        self.logs = []
-
 
     ###############################################
     # Design Preference Functions Start
@@ -159,32 +156,55 @@ class LapJointWelded(MomentConnection):
         return weld
 
     def set_osdaglogger(self, key):
-        global logger
-        logger = logging.getLogger('Osdag')
-        
-        def add_logs(record):
-            self.logs.append({'msg': record.getMessage()})
-            return True
-        # Checks if it should print the message or not (will always print it as True returned)
-        logger.addFilter(add_logs)
+        """
+        Function to set Logger for FinPlate Module
+        """
+        # @author Arsil Zunzunia
 
-        logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        # Set Custom logger
+        logging.setLoggerClass(CustomLogger)
+
+        # Create unique logger name per instance
+        unique_logger_name = 'Osdag_lap_joint_welded_simple_conn'
+        self.logger = logging.getLogger(unique_logger_name)
+
+        if not isinstance(self.logger, CustomLogger):
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
         
-        handler = logging.FileHandler('logging_text.log')
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        # Clear any existing handlers
+        self.logger.handlers.clear()
+        self.logger.setLevel(logging.DEBUG)
         
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
+
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                                          datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
 
     def input_value_changed(self):
         lst = []
@@ -257,33 +277,6 @@ class LapJointWelded(MomentConnection):
     def module_name(self):
         return KEY_DISP_LAPJOINTWELDED
 
-    def call_3DColumn(self, ui, bgcolor):
-        if ui.chkBxCol.isChecked():
-            ui.btn3D.setChecked(Qt.Unchecked)
-            ui.chkBxCol.setChecked(Qt.Unchecked)
-            ui.mytabWidget.setCurrentIndex(0)
-        ui.commLogicObj.display_3DModel("Column", bgcolor)
-
-    def get_3d_components(self):
-        components = []
-        t1 = ('Model', self.call_3DModel)
-        components.append(t1)
-        t3 = ('Plate1', self.call_3DColumn)
-        components.append(t3)
-        t4 = ('Plate2', self.call_3DPlate)
-        components.append(t4)
-        return components
-
-    def call_3DPlate(self, ui, bgcolor):
-        from PyQt5.QtWidgets import QCheckBox
-        from PyQt5.QtCore import Qt
-        for chkbox in ui.frame.children():
-            if chkbox.objectName() == 'Cover Plate':
-                continue
-            if isinstance(chkbox, QCheckBox):
-                chkbox.setChecked(Qt.Unchecked)
-        ui.commLogicObj.display_3DModel("Cover Plate", bgcolor)
-
     def func_for_validation(self, design_dictionary):
         all_errors = []
         self.design_status = False
@@ -291,7 +284,7 @@ class LapJointWelded(MomentConnection):
         flag1 = False
         flag2 = False
 
-        option_list = self.input_values(self)
+        option_list = self.input_values()
         missing_fields_list = []
 
         for option in option_list:
@@ -363,24 +356,32 @@ class LapJointWelded(MomentConnection):
                          type=design_dictionary[KEY_DP_WELD_TYPE],
                          fabrication=design_dictionary.get(KEY_DP_FAB_SHOP, KEY_DP_FAB_SHOP))
         self.weld.size = design_dictionary[KEY_WELD_SIZE]
+        self.weld.size = design_dictionary[KEY_WELD_SIZE]
         self.design_of_weld(design_dictionary)
 
+        # 3D Display Labels
+        self.hover_dict = {}
+        self.hover_dict["Model"] = "Lap Joint Welded Connection"
+        self.hover_dict["Plate 1"] = f"Plate 1 ({self.plate1.thickness[0]} mm)"
+        self.hover_dict["Plate 2"] = f"Plate 2 ({self.plate2.thickness[0]} mm)"
+        self.hover_dict["Weld"] = f"Fillet Weld ({self.weld.size} mm)"
+
     def design_of_weld(self, design_dictionary):
-        logger.info(": =========== Design of Lap Joint Welded Connection ==========")
-        logger.info(": Design Approach: IS 800:2007 Clause 10.5")
+        self.logger.info(": =========== Design of Lap Joint Welded Connection ==========")
+        self.logger.info(": Design Approach: IS 800:2007 Clause 10.5")
         self.utilization_ratios = {}
 
         if not self.weld_size_check(design_dictionary):
             return
 
         self.calculate_weld_strength(design_dictionary)
-        self.calculate_weld_length(self)
-        self.check_long_joint(self)
+        self.calculate_weld_length()
+        self.check_long_joint()
         self.check_base_metal_strength(design_dictionary)
-        self.calculate_final_utilization_ratio(self)
+        self.calculate_final_utilization_ratio()
 
     def weld_size_check(self, design_dictionary):
-        logger.info(": =============== Weld Size Check ===============")
+        self.logger.info(": =============== Weld Size Check ===============")
         weld_size = design_dictionary[KEY_WELD_SIZE]
         plate1_thk = float(design_dictionary[KEY_PLATE1_THICKNESS])
         plate2_thk = float(design_dictionary[KEY_PLATE2_THICKNESS])
@@ -388,8 +389,8 @@ class LapJointWelded(MomentConnection):
         s_min = IS800_2007.cl_10_5_2_3_min_weld_size(plate1_thk, plate2_thk)
         s_max = Tmin - 1.5 if Tmin >= 10 else Tmin
 
-        logger.info(f": Minimum weld size required (s_min) = {s_min} mm [Ref. Table 21, Cl.10.5.2.3]")
-        logger.info(f": Maximum allowed weld size (s_max) = {s_max} mm [Ref. Cl.10.5.3.1]")
+        self.logger.info(f": Minimum weld size required (s_min) = {s_min} mm [Ref. Table 21, Cl.10.5.2.3]")
+        self.logger.info(f": Maximum allowed weld size (s_max) = {s_max} mm [Ref. Cl.10.5.3.1]")
 
         selected_size = None
         if isinstance(weld_size, str) and weld_size.lower() == 'all':
@@ -405,16 +406,16 @@ class LapJointWelded(MomentConnection):
                 pass
 
         if selected_size is None:
-            logger.error(": Selected weld size is not suitable.")
+            self.logger.error(": Selected weld size is not suitable.")
             self.design_status = False
             return False
 
         self.weld_size = selected_size
-        logger.info(f": Selected weld size = {self.weld_size} mm (Pass)")
+        self.logger.info(f": Selected weld size = {self.weld_size} mm (Pass)")
         return True
 
     def calculate_weld_strength(self, design_dictionary):
-        logger.info(": ============== Weld Strength Calculation ==============")
+        self.logger.info(": ============== Weld Strength Calculation ==============")
         # IS800:2007 Cl.10.5.3.2: Throat thickness a = K * s, where K depends on angle
         # For fillet welds, K = sin(θ), θ = weld angle (default 45° if not specified)
         weld_angle = design_dictionary.get('weld_angle', 45)
@@ -426,76 +427,76 @@ class LapJointWelded(MomentConnection):
         # K = sin(angle)
         K = round(math.sin(math.radians(weld_angle)), 3)
         if K <= 0:
-            logger.error(f": Invalid weld angle {weld_angle}°. Using default K=0.7 (45°)")
+            self.logger.error(f": Invalid weld angle {weld_angle}°. Using default K=0.7 (45°)")
             K = 0.7
         self.effective_throat_thickness = K * self.weld_size  # Cl.10.5.3.2
-        logger.info(f": Effective throat thickness (a) = {self.effective_throat_thickness:.2f} mm [Cl.10.5.3.2, K={K}, θ={weld_angle}°]")
+        self.logger.info(f": Effective throat thickness (a) = {self.effective_throat_thickness:.2f} mm [Cl.10.5.3.2, K={K}, θ={weld_angle}°]")
         self.fu = float(design_dictionary[KEY_DP_WELD_MATERIAL_G_O])
         self.gamma_mw = 1.25 if design_dictionary[KEY_DP_WELD_TYPE] == "Shop weld" else 1.50  # Cl.10.5.7.1
         self.weld_design_strength = (self.fu * self.effective_throat_thickness) / (math.sqrt(3) * self.gamma_mw)  # Cl.10.5.7.1
         self.parent_design_strength = 0.6 * self.fu * self.effective_throat_thickness / self.gamma_mw  # Cl.10.5.7.2
         self.fillet_weld_design_strength = min(self.weld_design_strength, self.parent_design_strength)
-        logger.info(f": Design strength of fillet weld = {self.fillet_weld_design_strength:.2f} N/mm^2 [Cl.10.5.7]")
+        self.logger.info(f": Design strength of fillet weld = {self.fillet_weld_design_strength:.2f} N/mm^2 [Cl.10.5.7]")
         # Weld stress check (Cl.10.5.7):
         self.weld_stress = self.tensile_force / (2 * self.effective_throat_thickness * self.l_eff) if hasattr(self, 'l_eff') and self.l_eff else 0
         if self.weld_stress > self.fillet_weld_design_strength:
             error_msg = f"Weld stress {self.weld_stress:.2f} N/mm^2 exceeds design strength {self.fillet_weld_design_strength:.2f} N/mm^2 [Cl.10.5.7]"
-            logger.error(": " + error_msg)
+            self.logger.error(": " + error_msg)
             print("[Osdag ERROR]", error_msg)
             self.design_status = False
             self.design_error = "Weld stress exceeds design strength."
             return
 
     def calculate_weld_length(self):
-        logger.info(": ============== Weld Length Calculation ==============")
+        self.logger.info(": ============== Weld Length Calculation ==============")
         # Required effective weld length (Cl.10.5.4.1)
         self.weld_length_required = self.tensile_force / (2 * self.fillet_weld_design_strength)
         self.leff_min = max(4 * self.weld_size, 40)  # Cl.10.5.4.1
         self.leff_max = 70 * self.weld_size  # Cl.10.5.4.1
-        logger.info(f": Required effective weld length = {self.weld_length_required:.2f} mm")
-        logger.info(f": Minimum effective weld length = {self.leff_min} mm [Cl.10.5.4.1]")
-        logger.info(f": Maximum effective weld length = {self.leff_max} mm [Cl.10.5.4.1]")
+        self.logger.info(f": Required effective weld length = {self.weld_length_required:.2f} mm")
+        self.logger.info(f": Minimum effective weld length = {self.leff_min} mm [Cl.10.5.4.1]")
+        self.logger.info(f": Maximum effective weld length = {self.leff_max} mm [Cl.10.5.4.1]")
         # Check min/max
         if self.weld_length_required < self.leff_min:
             self.l_eff = self.leff_min
-            logger.warning(f": Required length is less than minimum, using l_eff = {self.l_eff} mm [Cl.10.5.4.1]")
+            self.logger.warning(f": Required length is less than minimum, using l_eff = {self.l_eff} mm [Cl.10.5.4.1]")
         elif self.weld_length_required > self.leff_max:
-            logger.error(": Required weld length exceeds maximum allowed. Increase weld size. [Cl.10.5.4.1]")
+            self.logger.error(": Required weld length exceeds maximum allowed. Increase weld size. [Cl.10.5.4.1]")
             self.design_status = False
             raise ValueError("Required weld length exceeds maximum allowed.")
         else:
             self.l_eff = self.weld_length_required
-            logger.info(": Required weld length is within limits (Pass)")
+            self.logger.info(": Required weld length is within limits (Pass)")
         # Detailing: Minimum spacing between parallel fillet welds (Cl.10.5.4.2)
         # Not implemented here, but should be checked in GUI or input validation
 
     def check_long_joint(self):
-        logger.info(": ============== Long Joint Check ==============")
+        self.logger.info(": ============== Long Joint Check ==============")
         # IS800:2007 Cl.10.5.7.3: Long joint reduction factor
         self.beta_lw = 1.0
         if self.l_eff > 150 * self.effective_throat_thickness:
             self.beta_lw = 1.2 - 0.2 * (self.l_eff / (150 * self.effective_throat_thickness))
             self.beta_lw = max(0.6, min(self.beta_lw, 1.0))
-            logger.info(f": Joint is long, reduction factor beta_lw = {self.beta_lw:.3f} [Cl.10.5.7.3]")
+            self.logger.info(f": Joint is long, reduction factor beta_lw = {self.beta_lw:.3f} [Cl.10.5.7.3]")
         else:
-            logger.info(": No reduction for long joint required (Pass)")
+            self.logger.info(": No reduction for long joint required (Pass)")
         # Modified required length
         l_req_modified = self.l_eff / self.beta_lw
         if l_req_modified < self.leff_min:
-            logger.warning(f": Modified required weld length {l_req_modified:.2f} mm is less than minimum effective length {self.leff_min} mm [Cl.10.5.4.1]")
+            self.logger.warning(f": Modified required weld length {l_req_modified:.2f} mm is less than minimum effective length {self.leff_min} mm [Cl.10.5.4.1]")
             self.l_eff = self.leff_min
         elif l_req_modified > self.leff_max:
-            logger.error(": Modified required weld length exceeds maximum allowed. Increase weld size. [Cl.10.5.4.1]")
+            self.logger.error(": Modified required weld length exceeds maximum allowed. Increase weld size. [Cl.10.5.4.1]")
             self.design_status = False
             raise ValueError("Modified required weld length exceeds maximum allowed.")
         else:
             self.l_eff = l_req_modified
         # End return length (Cl.10.5.4.5): min(2*s, 12mm)
         self.end_return_length = max(2 * self.weld_size, 12)  # Cl.10.5.4.5
-        logger.info(f": End return length = {self.end_return_length} mm [Cl.10.5.4.5]")
+        self.logger.info(f": End return length = {self.end_return_length} mm [Cl.10.5.4.5]")
         # Overlap length (Cl.10.5.4.3): min overlap = 4*s or 40mm, whichever is more
         self.overlap_length = max(4 * self.weld_size, 40)
-        logger.info(f": Overlap length = {self.overlap_length} mm [Cl.10.5.4.3]")
+        self.logger.info(f": Overlap length = {self.overlap_length} mm [Cl.10.5.4.3]")
         self.connection_length = self.l_eff + 2 * self.end_return_length
         # Design capacity (Cl.10.5.7.3):
         self.design_capacity = 2 * self.l_eff * self.fillet_weld_design_strength * self.beta_lw
@@ -503,17 +504,17 @@ class LapJointWelded(MomentConnection):
         self.weld_stress = self.tensile_force / (2 * self.effective_throat_thickness * self.l_eff) if self.l_eff else 0
         if self.weld_stress > self.fillet_weld_design_strength:
             error_msg = f"Weld stress {self.weld_stress:.2f} N/mm^2 exceeds design strength {self.fillet_weld_design_strength:.2f} N/mm^2 [Cl.10.5.7]"
-            logger.error(": " + error_msg)
+            self.logger.error(": " + error_msg)
             print("[Osdag ERROR]", error_msg)
             self.design_status = False
             self.design_error = "Weld stress exceeds design strength."
             return
         self.utilization_ratios['weld'] = self.tensile_force / self.design_capacity if self.design_capacity > 0 else float('inf')
-        logger.info(f": Provided effective length = {self.l_eff:.2f} mm")
-        logger.info(f": Design capacity of weld = {self.design_capacity/1000:.2f} kN")
+        self.logger.info(f": Provided effective length = {self.l_eff:.2f} mm")
+        self.logger.info(f": Design capacity of weld = {self.design_capacity/1000:.2f} kN")
 
     def check_base_metal_strength(self, design_dictionary):
-        logger.info(": ============== Base Metal Strength Check ==============")
+        self.logger.info(": ============== Base Metal Strength Check ==============")
         # IS800:2007 Cl.6.2.2, 6.2.3, 6.3 (shear lag), Cl.7.1.2 (compression)
         Tmin = min(float(design_dictionary[KEY_PLATE1_THICKNESS]), float(design_dictionary[KEY_PLATE2_THICKNESS]))
         self.A_g = Tmin * self.width
@@ -523,7 +524,7 @@ class LapJointWelded(MomentConnection):
         if self.design_for == 'Compression':
             # Compression: use gross area yielding (Cl.7.1.2)
             self.T_db = self.A_g * self.plate1.fy / self.gamma_m0
-            logger.info(f": Design strength of plate in compression = {self.T_db/1000:.2f} kN [Cl.7.1.2]")
+            self.logger.info(f": Design strength of plate in compression = {self.T_db/1000:.2f} kN [Cl.7.1.2]")
         else:
             # Tension: yielding and rupture, take minimum (Cl.6.2.2, 6.2.3, 6.3.3)
             # Shear lag factor (Cl.6.3.3): For lap joints, net section efficiency = 0.7
@@ -531,28 +532,28 @@ class LapJointWelded(MomentConnection):
             T_dg = self.A_g * self.plate1.fy / self.gamma_m0  # Gross section yielding (Cl.6.2.2)
             T_dn = 0.9 * self.A_g * self.plate1.fu * shear_lag_factor / self.gamma_m1  # Net section rupture (Cl.6.2.3, 6.3.3)
             self.T_db = min(T_dg, T_dn)
-            logger.info(f": Design strength of plate in tension = {self.T_db/1000:.2f} kN [Cl.6.2.2, 6.2.3, 6.3.3]")
+            self.logger.info(f": Design strength of plate in tension = {self.T_db/1000:.2f} kN [Cl.6.2.2, 6.2.3, 6.3.3]")
         
         self.utilization_ratios['base_metal'] = self.axial_force / self.T_db if self.T_db > 0 else float('inf')
 
     def calculate_final_utilization_ratio(self):
-        logger.info(": ============== Final Check ==============")
+        self.logger.info(": ============== Final Check ==============")
         # Eccentricity check (IS800:2007 Cl.10.5.7.4):
         # For lap joints, if eccentricity exists, reduce design strength accordingly (not implemented, placeholder)
         # TODO: Implement eccentricity reduction if required
         self.utilization_ratio = max(self.utilization_ratios.values())
-        logger.info(f": Weld utilization ratio = {self.utilization_ratios['weld']:.3f}")
-        logger.info(f": Base metal utilization ratio = {self.utilization_ratios['base_metal']:.3f}")
-        logger.info(f": Overall utilization ratio = {self.utilization_ratio:.3f}")
+        self.logger.info(f": Weld utilization ratio = {self.utilization_ratios['weld']:.3f}")
+        self.logger.info(f": Base metal utilization ratio = {self.utilization_ratios['base_metal']:.3f}")
+        self.logger.info(f": Overall utilization ratio = {self.utilization_ratio:.3f}")
         if self.utilization_ratio > 1.0:
             error_msg = "Design is UNSAFE. Utilization ratio exceeds 1.0."
-            logger.error(": " + error_msg)
+            self.logger.error(": " + error_msg)
             print("[Osdag ERROR]", error_msg)
             self.design_status = False
             self.design_error = "Utilization ratio exceeds 1.0. Design is unsafe."
             return
         else:
-            logger.info(": Design is SAFE.")
+            self.logger.info(": Design is SAFE.")
             self.design_status = True
         self.weld_strength = self.design_capacity
         self.weld_length_effective = self.l_eff
@@ -619,3 +620,51 @@ class LapJointWelded(MomentConnection):
         fname_no_ext = popup_summary['filename']
         CreateLatex.save_latex(CreateLatex(), self.report_input, self.report_check, popup_summary,
                              fname_no_ext, os.path.abspath(".").replace("\\", "/"), [], "/ResourceFiles/images/3d.png", module=self.module)
+
+    def get_3d_components(self):
+        components = []
+        t1 = ('Model', self.call_3DModel)
+        components.append(t1)
+        t2 = ('Plate 1', self.call_3DPlate1)
+        components.append(t2)
+        t3 = ('Plate 2', self.call_3DPlate2)
+        components.append(t3)
+        t4 = ('Welds', self.call_3DWeld)
+        components.append(t4)
+        return components
+
+    def call_3DModel(self, ui, bgcolor):
+        from PySide6.QtWidgets import QCheckBox
+        for chkbox in ui.cad_comp_widget.children():
+            if chkbox.objectName() == 'Model':
+                continue
+            if isinstance(chkbox, QCheckBox):
+                chkbox.setChecked(False)
+        ui.commLogicObj.display_3DModel("Model", bgcolor)
+
+    def call_3DPlate1(self, ui, bgcolor):
+        from PySide6.QtWidgets import QCheckBox
+        for chkbox in ui.cad_comp_widget.children():
+            if chkbox.objectName() == 'Plate 1':
+                continue
+            if isinstance(chkbox, QCheckBox):
+                chkbox.setChecked(False)
+        ui.commLogicObj.display_3DModel('Plate 1', bgcolor)
+
+    def call_3DPlate2(self, ui, bgcolor):
+        from PySide6.QtWidgets import QCheckBox
+        for chkbox in ui.cad_comp_widget.children():
+            if chkbox.objectName() == 'Plate 2':
+                continue
+            if isinstance(chkbox, QCheckBox):
+                chkbox.setChecked(False)
+        ui.commLogicObj.display_3DModel('Plate 2', bgcolor)
+
+    def call_3DWeld(self, ui, bgcolor):
+        from PySide6.QtWidgets import QCheckBox
+        for chkbox in ui.cad_comp_widget.children():
+            if chkbox.objectName() == 'Welds':
+                continue
+            if isinstance(chkbox, QCheckBox):
+                chkbox.setChecked(False)
+        ui.commLogicObj.display_3DModel('Welds', bgcolor)

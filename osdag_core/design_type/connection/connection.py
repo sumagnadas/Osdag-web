@@ -393,9 +393,9 @@ class Connection(Main):
 
         return supporting_section
 
-    def get_fu_fy_I_section_suptng(self):
-        material_grade = self[0]
-        designation = self[1].get(KEY_SUPTNGSEC, None)
+    def get_fu_fy_I_section_suptng(self, arg):
+        material_grade = arg[0]
+        designation = arg[1].get(KEY_SUPTNGSEC, None)
         fu = ''
         fy = ''
         if material_grade != "Select Material" and designation != "Select Section":
@@ -412,9 +412,9 @@ class Connection(Main):
 
         return d
 
-    def get_fu_fy_I_section_suptd(self):
-        material_grade = self[0]
-        designation = self[1].get(KEY_SUPTDSEC, None)
+    def get_fu_fy_I_section_suptd(self, arg):
+        material_grade = arg[0]
+        designation = arg[1].get(KEY_SUPTDSEC, None)
         fu = ''
         fy = ''
         if material_grade != "Select Material" and designation != "Select Section":
@@ -432,8 +432,8 @@ class Connection(Main):
 
         return d
 
-    def get_fu_fy(self):
-        material_grade = self[0]
+    def get_fu_fy(self, arg):
+        material_grade = arg[0]
         fu_conn = ''
         fy_20 = ''
         fy_20_40 = ''
@@ -463,8 +463,8 @@ class Connection(Main):
 
         return d
 
-    def get_bolt_tension_type_for_prying(self):
-        bolt_type = self[0]
+    def get_bolt_tension_type_for_prying(self, arg):
+        bolt_type = arg[0]
 
         if bolt_type == "Bearing Bolt":
             bolt_tension_type = 'Non pre-tensioned'
@@ -545,9 +545,9 @@ class Connection(Main):
 
             # hover labels
             if option[1] == KEY_DISP_COLSEC:
-                self.hover_dict["Column"] = f"Column Designation ({design_dictionary[option[0]]})"
+                self.hover_dict["Column"] = f"Column: {design_dictionary[option[0]]}"
             elif option[1] == KEY_DISP_BEAMSEC:
-                self.hover_dict["Beam"] = f"Beam Designation ({design_dictionary[option[0]]})"
+                self.hover_dict["Beam"] = f"Beam: {design_dictionary[option[0]]}"
 
             if option[2] == TYPE_COMBOBOX and option[0] != KEY_CONN:
                 if design_dictionary[option[0]] == 'Select Section' or design_dictionary[option[0]] == 'Select Grade':
@@ -653,7 +653,10 @@ class Connection(Main):
             if chkbox.objectName() == 'Column':
                 continue
             if isinstance(chkbox, QCheckBox):
+                # CRITICAL: Block signals to prevent cascading display_3DModel calls
+                chkbox.blockSignals(True)
                 chkbox.setChecked(False)
+                chkbox.blockSignals(False)
         ui.commLogicObj.display_3DModel("Column", bgcolor)
 
     def call_3DBeam(self, ui, bgcolor):
@@ -662,7 +665,10 @@ class Connection(Main):
             if chkbox.objectName() == 'Beam':
                 continue
             if isinstance(chkbox, QCheckBox):
+                # CRITICAL: Block signals to prevent cascading display_3DModel calls
+                chkbox.blockSignals(True)
                 chkbox.setChecked(False)
+                chkbox.blockSignals(False)
         ui.commLogicObj.display_3DModel("Beam", bgcolor)
 
     def new_material(self, input):

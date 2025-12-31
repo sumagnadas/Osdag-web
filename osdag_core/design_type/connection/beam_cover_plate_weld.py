@@ -219,9 +219,9 @@ class BeamCoverPlateWeld(MomentConnection):
 
         return add_buttons
 
-    def preference_type(self):
+    def preference_type(self, args):
 
-        pref_type = self[0]
+        pref_type = args[0]
         if pref_type == VALUES_FLANGEPLATE_PREFERENCES[0]:
             return True
         else:
@@ -229,42 +229,58 @@ class BeamCoverPlateWeld(MomentConnection):
     ####################################
     # Design Preference Functions End
     ####################################
+
     def set_osdaglogger(self, key):
-
         """
-        Function to set Logger for Tension Module
+        Function to set Logger for FinPlate Module
         """
+        # @author Arsil Zunzunia
 
-       # Set Custom logger
+        # Set Custom logger
         logging.setLoggerClass(CustomLogger)
 
-        self.logger = logging.getLogger('Osdag')
+        # Create unique logger name per instance
+        unique_logger_name = 'Osdag_btb_cover_plate_weld_moment_conn'
+        self.logger = logging.getLogger(unique_logger_name)
 
         if not isinstance(self.logger, CustomLogger):
-            logging.getLogger('Osdag').manager.loggerDict.pop('Osdag', None)
-            # clear any existing handlers
-            self.logger = logging.getLogger('Osdag')
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
         
+        # Clear any existing handlers
         self.logger.handlers.clear()
-
         self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        handler = logging.FileHandler('logging_text.log')
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                                          datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
+
     def input_value_changed(self):
 
         lst = []
@@ -581,8 +597,40 @@ class BeamCoverPlateWeld(MomentConnection):
         t20 = (KEY_INNERFLANGEPLATE_THICKNESS, KEY_DISP_INNERFLANGESPLATE_THICKNESS, TYPE_TEXTBOX,
                self.flange_in_plate_tk if flag else '', False)
         out_list.append(t20)
+        
+        # Populate hover dict
 
+        # Beam
+        self.hover_dict["Beam"] = (
+            f"<b>Beam</b><br>"
+            f"Section: {self.section.designation if flag else ''}<br>"
+            f"Depth: {self.section.depth if flag else ''} mm<br>"
+            f"Flange Width: {self.section.flange_width if flag else ''} mm<br>"
+            f"Web Thickness: {self.section.web_thickness if flag else ''} mm<br>"
+            f"Flange Thickness: {self.section.flange_thickness if flag else ''} mm"
+        )
 
+        # Cover Plates (Flange + Web)
+        self.hover_dict["Plate"] = (
+            f"<b>Cover Plates</b><br>"
+            f"Flange Plate: {self.flange_plate.length if flag else ''} × "
+            f"{self.flange_plate.height if flag else ''} × "
+            f"{self.flange_out_plate_tk if flag else ''} mm<br>"
+            f"Inner Flange Plate: {self.plate_in_len if flag else ''} × "
+            f"{self.flange_plate.Innerheight if flag else ''} × "
+            f"{self.flange_in_plate_tk if flag else ''} mm<br>"
+            f"Web Plate: {self.web_plate.length if flag else ''} × "
+            f"{self.web_plate.height if flag else ''} × "
+            f"{self.web_plate.thickness_provided if flag else ''} mm"
+        )
+
+        # Weld
+        self.hover_dict["Weld"] = (
+            f"<b>Weld</b><br>"
+            f"Flange Weld Size: {self.flange_weld.size if flag else ''} mm<br>"
+            f"Web Weld Size: {self.web_weld.size if flag else ''} mm<br>"
+            f"Weld Type: Fillet Weld"
+        )
 
         return out_list
 

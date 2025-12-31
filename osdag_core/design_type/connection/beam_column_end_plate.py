@@ -63,16 +63,19 @@ class BeamColumnEndPlate(MomentConnection):
         self.input_axial_force = 0.0
         self.input_moment = 0.0
 
+        self.hover_dict = {}
         # self.supported_section = Beam
-        self.bolt_diameter = []
         self.bolt_list = []
-        self.bolt_diameter_provided = 0
+
         self.bolt_grade = []
+        self.bolt_diameter = []
+        self.plate_thickness_list = []
+        self.plate_thickness = []
+
+        self.bolt_diameter_provided = 0
         self.bolt_grade_provided = 0.0
         self.bolt_hole_diameter = 0.0
         self.bolt_type = ""
-        self.plate_thickness = []
-        self.plate_thickness_list = []
 
         self.bolt_tension = 0.0
         self.bolt_fu = 0.0
@@ -240,42 +243,56 @@ class BeamColumnEndPlate(MomentConnection):
 
         self.diag_stiffener_groove_weld_status = False
 
-    # Set logger
     def set_osdaglogger(self, key):
-
         """
         Function to set Logger for FinPlate Module
         """
+        # @author Arsil Zunzunia
 
         # Set Custom logger
         logging.setLoggerClass(CustomLogger)
 
-        self.logger = logging.getLogger('Osdag')
+        # Create unique logger name per instance
+        unique_logger_name = 'Osdag_btc_end_plate_moment_conn'
+        self.logger = logging.getLogger(unique_logger_name)
 
         if not isinstance(self.logger, CustomLogger):
-            logging.getLogger('Osdag').manager.loggerDict.pop('Osdag', None)
-            # clear any existing handlers
-            self.logger = logging.getLogger('Osdag')
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
         
+        # Clear any existing handlers
         self.logger.handlers.clear()
-
         self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        handler = logging.FileHandler('logging_text.log')
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
 
     # set module name
     def module_name(self):
@@ -301,7 +318,7 @@ class BeamColumnEndPlate(MomentConnection):
         t2 = (KEY_ENDPLATE_TYPE, KEY_DISP_ENDPLATE_TYPE, TYPE_COMBOBOX, VALUES_ENDPLATE_TYPE, True, 'No Validator')
         options_list.append(t2)
 
-        t15 = (KEY_IMAGE, None, TYPE_IMAGE, str(files("osdag_core.data.ResourceFiles.images").joinpath("cf_bw_ebw.png")), True, 'No Validator')
+        t15 = (KEY_IMAGE, None, TYPE_IMAGE, str(files("osdag_core.data.ResourceFiles.images").joinpath("BC_CF-BW-Flush.png")), True, 'No Validator')
         options_list.append(t15)    
 
         t3 = (KEY_SUPTNGSEC, KEY_DISP_COLSEC, TYPE_COMBOBOX, connectdb("Columns"), True, 'No Validator')
@@ -368,10 +385,10 @@ class BeamColumnEndPlate(MomentConnection):
         return lst
 
 
-    def fn_conn_image(self):
+    def fn_conn_image(self, input):
         """ Display representative images of end plate type """
-        conn = self[0]
-        ep_type = self[1]
+        conn = input[0]
+        ep_type = input[1]
 
         if conn == CONN_CFBW and ep_type == VALUES_ENDPLATE_TYPE[0]:  # Flushed - Reversible Moment
             return str(files("osdag_core.data.ResourceFiles.images").joinpath("BC_CF-BW-Flush.png"))
@@ -573,6 +590,12 @@ class BeamColumnEndPlate(MomentConnection):
         t31 = (KEY_OUT_WELD_DETAILS, DISP_TITLE_WELD_TYPICAL_DETAIL, TYPE_OUT_BUTTON, ['Details', self.weld_details], True)
         out_list.append(t31)
 
+        # Populate Hover Dict
+
+        self.hover_dict["Bolt"] = f"<b>Bolt</b><br>Grade: {self.bolt.bolt_grade_provided if flag else ''}<br>Diameter: {int(self.bolt.bolt_diameter_provided) if flag else ''} mm<br>No. of Bolts: {int(self.bolt_numbers) if flag else ''}"
+        
+        self.hover_dict["Plate"]= f"Plate: {float(self.ep_width_provided) if flag else ''} mm x {float(self.ep_height_provided) if flag else ''} mm x {self.plate_thickness if flag else ''} mm"
+        
         return out_list
 
     # continuity plate details
@@ -882,13 +905,15 @@ class BeamColumnEndPlate(MomentConnection):
         return components
 
     def call_3DPlate(self, ui, bgcolor):
-        from PyQt5.QtWidgets import QCheckBox
-        from PyQt5.QtCore import Qt
-        for chkbox in ui.frame.children():
+        from PySide6.QtWidgets import QCheckBox
+        for chkbox in ui.cad_comp_widget.children():
             if chkbox.objectName() == 'End Plate':
                 continue
             if isinstance(chkbox, QCheckBox):
-                chkbox.setChecked(Qt.Unchecked)
+                # CRITICAL: Block signals to prevent cascading display_3DModel calls
+                chkbox.blockSignals(True)
+                chkbox.setChecked(False)
+                chkbox.blockSignals(False)
         ui.commLogicObj.display_3DModel("Connector", bgcolor)
 
     # get the input values from UI and other functions
@@ -907,7 +932,25 @@ class BeamColumnEndPlate(MomentConnection):
 
         self.supported_section = Beam(designation=design_dictionary[KEY_SUPTDSEC], material_grade=design_dictionary[KEY_SUPTDSEC_MATERIAL])
 
-        self.bolt = Bolt(grade=design_dictionary[KEY_GRD], diameter=design_dictionary[KEY_D],
+        # Normalize bolt diameter input (handles "M8", "8", 8, ["M8","M12"], etc.)
+        def _normalize_diameter(d):
+            if d is None:
+                return None
+            if isinstance(d, (list, tuple, np.ndarray)):
+                out = []
+                for x in d:
+                    if isinstance(x, str):
+                        out.append(float(str(x).strip().upper().replace('MM', '').replace('M', '')))
+                    else:
+                        out.append(float(x))
+                return out
+            if isinstance(d, str):
+                return float(d.strip().upper().replace('MM', '').replace('M', ''))
+            return float(d)
+
+        norm_diam = _normalize_diameter(design_dictionary[KEY_D])
+
+        self.bolt = Bolt(grade=design_dictionary[KEY_GRD], diameter=norm_diam,
                          bolt_type=design_dictionary[KEY_TYP],
                          bolt_hole_type=design_dictionary[KEY_DP_BOLT_HOLE_TYPE],
                          edge_type=design_dictionary[KEY_DP_DETAILING_EDGE_TYPE],
@@ -1017,7 +1060,7 @@ class BeamColumnEndPlate(MomentConnection):
         red_list = red_list_function()
 
         if self.supported_section.designation in red_list:
-            self.logger.warning(
+            self.self.logger.warning(
                 " : You are using a section (in red color) that is not available in latest version of IS 808")
             self.logger.info(
                 " : You are using a section (in red color) that is not available in latest version of IS 808")
@@ -1246,10 +1289,10 @@ class BeamColumnEndPlate(MomentConnection):
             #
             #     self.load_moment = round(self.supported_section_mom_capa_m_zz, 2)
             #
-            #     self.logger.warning("The Load(s) defined is/are less than the minimum recommended value [Ref. IS 800:2007, Cl.10.7]")
-            #     self.logger.info("The value of factored axial force ({} kN) is less than the minimum recommended value [Ref. Cl.10.7, IS 800:2007]".
+            #     logger.warning("The Load(s) defined is/are less than the minimum recommended value [Ref. IS 800:2007, Cl.10.7]")
+            #     logger.info("The value of factored axial force ({} kN) is less than the minimum recommended value [Ref. Cl.10.7, IS 800:2007]".
             #                 format(self.input_axial_force))
-            #     self.logger.info("The value of axial force is set at {} kN, as per the minimum recommended value by Cl.10.7".format(self.load_axial))
+            #     logger.info("The value of axial force is set at {} kN, as per the minimum recommended value by Cl.10.7".format(self.load_axial))
             else:
                 self.load_axial = self.input_axial_force
                 self.load_moment = self.input_moment
@@ -1308,21 +1351,21 @@ class BeamColumnEndPlate(MomentConnection):
         #     # update moment value
         #     self.load_moment = round(0.5 * self.supported_section_mom_capa_m_zz, 2)  # kNm
         #
-        #     self.logger.warning("[Minimum Factored Load] The external factored bending moment ({} kNm) is less than 0.5 times the plastic moment "
+        #     logger.warning("[Minimum Factored Load] The external factored bending moment ({} kNm) is less than 0.5 times the plastic moment "
         #                    "capacity of the beam ({} kNm)".format(self.load.moment, self.load_moment))
-        #     self.logger.info("The minimum factored bending moment should be at least 0.5 times the plastic moment capacity of the beam to qualify the "
+        #     logger.info("The minimum factored bending moment should be at least 0.5 times the plastic moment capacity of the beam to qualify the "
         #                 "connection as rigid and transfer full moment from the beam to the column (Cl. 10.7, IS 800:2007)")
-        #     self.logger.info("Designing the connection for a load of {} kNm".format(self.load_moment))
+        #     logger.info("Designing the connection for a load of {} kNm".format(self.load_moment))
         #
         # elif self.load.moment > self.supported_section_mom_capa_m_zz:
         #     self.load_moment = self.supported_section_mom_capa_m_zz  # kNm
         #     self.minimum_load_status_moment = True
         #     self.design_status = False
         #     self.design_status_list.append(self.design_status)
-        #     self.logger.error("[Maximum Factored Load] The external factored bending moment ({} kNm) is greater than the plastic moment capacity of the "
+        #     logger.error("[Maximum Factored Load] The external factored bending moment ({} kNm) is greater than the plastic moment capacity of the "
         #                  "beam ({} kNm)".format(self.load.moment, self.supported_section_mom_capa_m_zz))
-        #     self.logger.warning("The maximum capacity of the connection is {} kNm".format(self.supported_section_mom_capa_m_zz))
-        #     self.logger.info("Define the value of factored bending moment as {} kNm or less".format(self.supported_section_mom_capa_m_zz))
+        #     logger.warning("The maximum capacity of the connection is {} kNm".format(self.supported_section_mom_capa_m_zz))
+        #     logger.info("Define the value of factored bending moment as {} kNm or less".format(self.supported_section_mom_capa_m_zz))
         # else:
         #     self.minimum_load_status_moment = False
         #     self.load_moment = self.load.moment  # kNm
@@ -2311,8 +2354,8 @@ class BeamColumnEndPlate(MomentConnection):
             self.logger.info(": Overall beam to column end plate connection design is UNSAFE")
             self.logger.info(": ========== End Of Design ============")
 
-    def save_design(self, popup_summary): 
-        super(BeamColumnEndPlate,self).save_design()
+    def save_design(self, popup_summary):
+        # bolt_list = str(*self.bolt.bolt_diameter, sep=", ")
 
         if self.supported_section.flange_slope == 90:
             image = "Parallel_Beam"
@@ -3275,5 +3318,3 @@ class BeamColumnEndPlate(MomentConnection):
 
         CreateLatex.save_latex(CreateLatex(), self.report_input, self.report_check, popup_summary, fname_no_ext,
                                rel_path, Disp_2d_image, Disp_3d_image, module=self.module)
-        return True
-        

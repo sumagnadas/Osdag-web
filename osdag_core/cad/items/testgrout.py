@@ -402,7 +402,7 @@ if __name__ == '__main__':
     from OCC.Core.Quantity import Quantity_NOC_SADDLEBROWN, Quantity_NOC_BLUE1
     from OCC.Core.Graphic3d import Graphic3d_NOM_ALUMINIUM
     from ...utilities import osdag_display_shape
-    # from osdag_core.cad.common_logic import CommonDesignLogic
+    # from cad.common_logic import CommonDesignLogic
 
     # from OCC.Core.Graphic3d import Quantity_NOC_GRAY as GRAY
     from OCC.Core.Quantity import Quantity_NOC_GRAY25 as GRAY

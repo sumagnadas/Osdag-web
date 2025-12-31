@@ -1,8 +1,7 @@
 import logging
 import math
 import numpy as np
-from pathlib import Path
-# PySide6 imports removed - will be imported lazily when needed (only for desktop GUI)
+from PySide6.QtWidgets import QDialog
 
 from ....Common import *
 from ....utils.common.material import *
@@ -18,9 +17,8 @@ from ....utils.common.Unsymmetrical_Section_Properties import Unsymmetrical_I_Se
 
 # New imports
 from ....Common import *
-# GUI imports removed - will be imported lazily when needed (only for desktop GUI)
-# from ..gui.dialogs import RangeInputDialog, PopupDialog
-# from ..gui.widgets import My_ListWidget, My_ListWidgetItem
+from ..gui.dialogs import RangeInputDialog, PopupDialog
+from ..gui.widgets import My_ListWidget, My_ListWidgetItem
 from .section import Section, calc_yj, shear_stress_unsym_I, classify_section
 from .pso_optimizer import GlobalBestPSO
 from ..optimization.intelligent_pso import IntelligentPSO
@@ -45,11 +43,6 @@ from ..report.latex_report import save_design
 from ....custom_logger import CustomLogger
 
 scale = 1
-
-# Standard stiffener thickness values (mm) - as per documentation
-# Used for intermediate and longitudinal stiffeners
-VALUES_STIFFENER_THICKNESS = ['6', '8', '10', '12', '14', '16', '18', '20', 
-                               '22', '24', '26', '28', '30', '32', '36', '40']
 
 class PlateGirderWelded(Member):
     int_thicklist = []
@@ -320,19 +313,10 @@ class PlateGirderWelded(Member):
         if arg[0] == 'All':
             return {KEY_IntermediateStiffener_thickness_val : VALUES_STIFFENER_THICKNESS}
         else:
-            # Lazy import for GUI components (only needed in desktop app, not web backend)
-            try:
-                from PySide6.QtWidgets import QDialog
-                from ..gui.dialogs import PopupDialog
-                popup = PopupDialog()
-                popup.listWidget.addItems(VALUES_STIFFENER_THICKNESS)
-                if popup.exec_() == QDialog.Accepted:
-                    selected_items = popup.get_selected_items()
-            except ImportError:
-                # PySide6 not available (web backend) - return default or raise error
-                # For web backend, this method shouldn't be called, but handle gracefully
-                logging.warning("PySide6 not available - cannot show dialog. Using default values.")
-                selected_items = VALUES_STIFFENER_THICKNESS[:5]  # Return first 5 as fallback
+            popup = PopupDialog()
+            popup.listWidget.addItems(VALUES_STIFFENER_THICKNESS)
+            if popup.exec_() == QDialog.Accepted:
+                selected_items = popup.get_selected_items()
             PlateGirderWelded.int_thicklist = selected_items
             return {KEY_IntermediateStiffener_thickness_val : selected_items}                                 
             
@@ -341,19 +325,10 @@ class PlateGirderWelded(Member):
         if arg[0] == 'All':
             return {KEY_LongitudnalStiffener_thickness_val : VALUES_STIFFENER_THICKNESS}
         else:
-            # Lazy import for GUI components (only needed in desktop app, not web backend)
-            try:
-                from PySide6.QtWidgets import QDialog
-                from ..gui.dialogs import PopupDialog
-                popup = PopupDialog()
-                popup.listWidget.addItems(VALUES_STIFFENER_THICKNESS)
-                if popup.exec_() == QDialog.Accepted:
-                    selected_items2 = popup.get_selected_items()
-            except ImportError:
-                # PySide6 not available (web backend) - return default or raise error
-                # For web backend, this method shouldn't be called, but handle gracefully
-                logging.warning("PySide6 not available - cannot show dialog. Using default values.")
-                selected_items2 = VALUES_STIFFENER_THICKNESS[:5]  # Return first 5 as fallback
+            popup = PopupDialog()
+            popup.listWidget.addItems(VALUES_STIFFENER_THICKNESS)
+            if popup.exec_() == QDialog.Accepted:
+                selected_items2 = popup.get_selected_items()
             PlateGirderWelded.long_thicklist = selected_items2
             return {KEY_LongitudnalStiffener_thickness_val : selected_items2}
 
@@ -789,18 +764,15 @@ class PlateGirderWelded(Member):
             print(f"DEBUG: Material Created -> Grade: {design_dictionary[KEY_MATERIAL]}, Thickness: {thickness_for_mat}mm, fy={self.material.fy} MPa, fu={self.material.fu} MPa")
         self.eff_width_longitudnal = min(self.top_flange_width,self.bottom_flange_width) - self.web_thickness/2 - 10
         
-        intermediate_stiffener_thickness = design_dictionary.get(KEY_IntermediateStiffener_thickness, 'Standard')
-        if intermediate_stiffener_thickness == 'Customized':
-            design_dictionary[KEY_IntermediateStiffener_thickness_val] = PlateGirderWelded.int_thicklist if PlateGirderWelded.int_thicklist else VALUES_STIFFENER_THICKNESS
+        if design_dictionary[KEY_IntermediateStiffener_thickness] == 'Customized':
+            design_dictionary[KEY_IntermediateStiffener_thickness_val] = PlateGirderWelded.int_thicklist
         else:
             design_dictionary[KEY_IntermediateStiffener_thickness_val] = VALUES_STIFFENER_THICKNESS
         
         self.int_thickness_list = design_dictionary[KEY_IntermediateStiffener_thickness_val]
 
-        # Handle longitudinal stiffener thickness (use .get() with default to avoid KeyError)
-        longitudinal_stiffener_thickness = design_dictionary.get(KEY_LongitudnalStiffener_thickness, 'Standard')
-        if longitudinal_stiffener_thickness == 'Customized':
-            design_dictionary[KEY_LongitudnalStiffener_thickness_val] = PlateGirderWelded.long_thicklist if PlateGirderWelded.long_thicklist else VALUES_STIFFENER_THICKNESS
+        if design_dictionary[KEY_LongitudnalStiffener_thickness] == 'Customized':
+            design_dictionary[KEY_LongitudnalStiffener_thickness_val] = PlateGirderWelded.long_thicklist
         else:
             design_dictionary[KEY_LongitudnalStiffener_thickness_val] = VALUES_STIFFENER_THICKNESS
 
@@ -1990,17 +1962,9 @@ class PlateGirderWelded(Member):
                  
         self.betab = round(self.beta_b_lt,2)
         
-        # Area calculation: create instance and call calc_area with all required parameters
-        # calc_area returns area in cm^2 (already divided by 100 in the method)
-        unsym_section = Unsymmetrical_I_Section_Properties()
-        self.effectivearea = round(unsym_section.calc_area(
-            self.total_depth, 
-            self.top_flange_width, 
-            self.bottom_flange_width, 
-            self.web_thickness, 
-            self.top_flange_thickness, 
-            self.bottom_flange_thickness
-        ), 2)
+        # Area already divided by 100 in logic, just need to ensure unit label in Common.py is correct (cm^2)
+        # Note: Unsymmetrical_I_Section_Properties.calc_area returns mm^2. Division by 100 gives cm^2? No, mm^2 to cm^2 is /100.
+        self.effectivearea = round(Unsymmetrical_I_Section_Properties.calc_area(self.total_depth, self.top_flange_width, self.bottom_flange_width, self.web_thickness, self.top_flange_thickness, self.bottom_flange_thickness)/100, 2)
         
         if self.Md == None:
             self.Md = 0

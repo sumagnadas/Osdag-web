@@ -210,13 +210,13 @@ class IS800_2007(object):
                 section_class = 'Semi-Compact'
             else:
                 section_class = 'Slender'
-        print(f" flange_class"
-                    f" width {width}"
-                    f" thickness {thickness}"
-                    f" epsilon {epsilon}"
-                    )
-        print(f" section_type {section_type}"
-              f" section_class {section_class}")
+        # print(f" flange_class"
+        #             f" width {width}"
+        #             f" thickness {thickness}"
+        #             f" epsilon {epsilon}"
+        #             )
+        # print(f" section_type {section_type}"
+        #       f" section_class {section_class}")
         return [section_class, ratio]
 
     @staticmethod
@@ -240,12 +240,12 @@ class IS800_2007(object):
 
         ratio = depth / thickness
 
-        print(f" web_class \n" 
-              f" depth {depth} \n"
-              f" thickness {thickness} \n"
-              f" epsilon {epsilon} \n"
-               f" classification_type {classification_type}\n"
-              )
+        # print(f" web_class \n" 
+        #       f" depth {depth} \n"
+        #       f" thickness {thickness} \n"
+        #       f" epsilon {epsilon} \n"
+        #        f" classification_type {classification_type}\n"
+        #       )
 
         if classification_type == 'Neutral axis at mid-depth':
             if ratio < (84 * epsilon):
@@ -264,7 +264,7 @@ class IS800_2007(object):
                 section_class = 'Slender'
             else:
                 section_class = 'Semi-Compact'
-        print(f" section_class {section_class}")
+        # print(f" section_class {section_class}")
 
         return section_class
 
@@ -840,7 +840,38 @@ class IS800_2007(object):
                 }
 
         return buckling_class
-    
+
+    @staticmethod
+    def cl_7_1_2_1_design_compressisive_stress_plategirder(f_y, gamma_mo, effective_slenderness_ratio,
+                                               modulus_of_elasticity):
+        """
+        Args:
+            f_y:Yield stress                                                                        (float)
+            gamma_mo:Effective length of member                                                        (float)
+            effective_slenderness_ratio:Euler buckling class                                                       (float)
+            imperfection_factor
+            modulus_of_elasticity
+
+        Returns:
+            list of euler_buckling_stress, nondimensional_effective_slenderness_ratio, phi, stress_reduction_factor, design_compressive_stress_fr .design_compressive_stress, design_compressive_stress_min
+        Note:
+            Reference: IS 800 pg34
+            @author:Rutvik Joshi
+        """
+        # 2.4 - Euler buckling stress
+        imperfection_factor = 0.49
+        euler_buckling_stress = (math.pi ** 2 * modulus_of_elasticity) / effective_slenderness_ratio ** 2
+        nondimensional_effective_slenderness_ratio = math.sqrt(f_y / euler_buckling_stress)
+        phi = 0.5 * (1 + imperfection_factor * (
+                    nondimensional_effective_slenderness_ratio - 0.2) + nondimensional_effective_slenderness_ratio ** 2)
+        # 2.6 - Design compressive stress
+        stress_reduction_factor = 1 / (phi + math.sqrt(phi ** 2 - nondimensional_effective_slenderness_ratio ** 2))
+        design_compressive_stress_fr = f_y * stress_reduction_factor / gamma_mo
+        design_compressive_stress_max = f_y / gamma_mo
+        design_compressive_stress = min(design_compressive_stress_fr, design_compressive_stress_max)
+        # print(f"euler_buckling_stress {euler_buckling_stress} , nondimensional_effective_slenderness_ratio {nondimensional_effective_slenderness_ratio} , phi {phi} , stress_reduction_factor {stress_reduction_factor} , design_compressive_stress_fr {design_compressive_stress_fr} , design_compressive_stress_max {design_compressive_stress_max} , design_compressive_stress {design_compressive_stress}")
+        return design_compressive_stress  
+
     @staticmethod
     def cl_7_1_2_1_design_compressisive_stress_fcd_buckling_class_c():
         data = {
@@ -925,11 +956,19 @@ class IS800_2007(object):
                 k2 = 0.6
                 k3 = 5
             elif fixity == 'Partial':
-                temp = cl_7_5_1_2_equivalent_slenderness_ratio_of_truss_compression_members_loaded_one_leg(length, r_min, b1, b2, t, f_y, bolt_no , fixity = 'Fixed')
-                temp2 = cl_7_5_1_2_equivalent_slenderness_ratio_of_truss_compression_members_loaded_one_leg(length, r_min, b1, b2, t, f_y, bolt_no , fixity = 'Hinged')
-                k1 = (temp[3] +temp2[3]) /2
-                k2 = (temp[4] +temp2[4]) /2
-                k3 = (temp[5] +temp2[5]) /2
+                # For partial fixity, interpolate between Fixed and Hinged cases using
+                # recursive calls to this same staticmethod. We must qualify the call
+                # with the class name; an unqualified name here would look for a
+                # module-level function and raise NameError.
+                temp = IS800_2007.cl_7_5_1_2_equivalent_slenderness_ratio_of_truss_compression_members_loaded_one_leg(
+                    length, r_min, b1, b2, t, f_y, bolt_no, fixity='Fixed'
+                )
+                temp2 = IS800_2007.cl_7_5_1_2_equivalent_slenderness_ratio_of_truss_compression_members_loaded_one_leg(
+                    length, r_min, b1, b2, t, f_y, bolt_no, fixity='Hinged'
+                )
+                k1 = (temp[3] + temp2[3]) / 2
+                k2 = (temp[4] + temp2[4]) / 2
+                k3 = (temp[5] + temp2[5]) / 2
 
         elif bolt_no == 1:
             if fixity == 'Fixed':
@@ -941,16 +980,12 @@ class IS800_2007(object):
                 k2 = 0.5
                 k3 = 60
             elif fixity == 'Partial':
-                temp = cl_7_5_1_2_equivalent_slenderness_ratio_of_truss_compression_members_loaded_one_leg(length,
-                                                                                                           r_min, b1,
-                                                                                                           b2, t, f_y,
-                                                                                                           bolt_no,
-                                                                                                           fixity='Fixed')
-                temp2 = cl_7_5_1_2_equivalent_slenderness_ratio_of_truss_compression_members_loaded_one_leg(length,
-                                                                                                            r_min, b1,
-                                                                                                            b2, t, f_y,
-                                                                                                            bolt_no,
-                                                                                                            fixity='Hinged')
+                temp = IS800_2007.cl_7_5_1_2_equivalent_slenderness_ratio_of_truss_compression_members_loaded_one_leg(
+                    length, r_min, b1, b2, t, f_y, bolt_no, fixity='Fixed'
+                )
+                temp2 = IS800_2007.cl_7_5_1_2_equivalent_slenderness_ratio_of_truss_compression_members_loaded_one_leg(
+                    length, r_min, b1, b2, t, f_y, bolt_no, fixity='Hinged'
+                )
                 k1 = (temp[3] + temp2[3]) / 2
                 k2 = (temp[4] + temp2[4]) / 2
                 k3 = (temp[5] + temp2[5]) / 2
@@ -1038,7 +1073,7 @@ class IS800_2007(object):
     @staticmethod
     def cl_8_2_2_Unsupported_beam_bending_phi_lt(alpha_lt, lambda_lt):
         a = 0.5 * ( 1 + alpha_lt * ( lambda_lt - 0.2) + lambda_lt ** 2)
-        print(alpha_lt, lambda_lt, a)
+        # print(alpha_lt, lambda_lt, a)
         return a
 
     @staticmethod
@@ -1310,14 +1345,14 @@ class IS800_2007(object):
 
     @staticmethod
     def cl_8_4_2_2_tau_crc_Simple_postcritical(K_v, E,mu, d, tw):
-        print('K_v',K_v,'\n E',E,'\nmu',mu,' d',d,' tw',tw)
+        # print('K_v',K_v,'\n E',E,'\nmu',mu,' d',d,' tw',tw)
         tau_crc = (K_v * math.pi**2 * E)/(12*(1-mu**2)*(d/tw)**2)
 
         return tau_crc
 
     @staticmethod
     def cl_8_4_2_2_lambda_w_Simple_postcritical(fyw, tau_crc):
-        print('fyw',fyw,'\n tau_crc',tau_crc)
+        # print('fyw',fyw,'\n tau_crc',tau_crc)
 
         lambda_w = math.sqrt(fyw/(math.sqrt(3) * tau_crc))
 
@@ -1325,7 +1360,7 @@ class IS800_2007(object):
 
     @staticmethod
     def cl_8_4_2_2_tau_b_Simple_postcritical(lambda_w, fyw):
-        print('fyw',fyw,' lambda_w',lambda_w)
+        # print('fyw',fyw,' lambda_w',lambda_w)
         if lambda_w <= 0.8:
             tau_b = fyw / math.sqrt(3)
         elif lambda_w < 1.2 and lambda_w > 0.8:
@@ -1337,7 +1372,7 @@ class IS800_2007(object):
 
     @staticmethod
     def cl_8_4_2_2_Vcr_Simple_postcritical(tau_b, A_v):
-        print('tau_b',tau_b,'\n A_v',A_v)
+        # print('tau_b',tau_b,'\n A_v',A_v)
 
         V_cr = A_v * tau_b
 
@@ -1393,6 +1428,76 @@ class IS800_2007(object):
         return phi,M_fr,s, w_tf,sai,fv,V_tf
 
     @staticmethod
+    def cl_8_4_2_2_TensionField_unequal_Isection(
+    c, d, tw, fyw,
+    bf_top, tf_top, bf_bot, tf_bot,
+    Nf, gamma_m0, A_v, tau_b):
+        """
+        Tension‐field method per IS 800:2007 Cl. 8.4.2.2 for unequal flanges.
+
+        Parameters:
+        c       : float : panel width (mm)
+        d       : float : web depth (mm)
+        tw      : float : web thickness (mm)
+        fyw     : float : web yield stress (N/mm²)
+        bf_top  : float : top flange width (mm)
+        tf_top  : float : top flange thickness (mm)
+        bf_bot  : float : bottom flange width (mm)
+        tf_bot  : float : bottom flange thickness (mm)
+        Nf      : float : axial force in each flange (kN → N·mm units consistent)
+        gamma_m0: float : partial safety factor
+        A_v     : float : gross web area = d*tw (mm²)
+        tau_b   : float : post‐buckling shear stress of web (N/mm²)
+        V_p     : float : plastic shear strength V_np (kN)
+
+        Returns:
+        tuple: (phi, Mfr_top, Mfr_bot, s_top, s_bot, w_tf, psi, fv, V_tf)
+        """
+
+        # 1) Tension‐field angle φ
+        if c == 0:
+            phi = 90.0
+        else:
+            phi = math.degrees(math.atan((d / c) / 1.5))
+
+        # 2) Reduced plastic moment of each flange
+        def Mfr(bf, tf):
+            Mp = 0.25 * bf * tf**2 * fyw
+            ratio = Nf / (bf * tf * fyw / gamma_m0)
+            if ratio >= 1:
+                return 0
+            else:
+                return Mp * (1 - ratio**2)
+
+        Mfr_t = Mfr(bf_top, tf_top)
+        Mfr_b = Mfr(bf_bot, tf_bot)
+
+        # 3) s‐values for each flange, limited to c
+
+        sinφ = math.sin(math.radians(phi))
+        if sinφ == 0:
+            s_t= 0
+            s_b= 0
+        else:
+            s_t = min(2 * math.sqrt(Mfr_t / (fyw * tw)) / sinφ, c)
+            s_b = min(2 * math.sqrt(Mfr_b / (fyw * tw)) / sinφ, c)
+
+
+        # 4) Width of the tension field w_tf
+        w_tf = d * math.cos(math.radians(phi)) - (c - s_t - s_b) * sinφ
+
+        # 5) Field yield strength f_v
+        psi = 1.5 * tau_b * math.sin(2 * math.radians(phi))
+        fv  = math.sqrt(fyw**2 - 3 * tau_b**2 + psi**2) - psi
+
+        # 6) Nominal shear resistance V_tf (kN)
+        V_tf = (A_v * tau_b + 0.9 * w_tf * tw * fv * sinφ)
+        V_p = d * tw * fyw / (math.sqrt(3) * gamma_m0)  # Plastic shear strength
+        V_tf = min(V_tf, V_p)
+
+        return phi, Mfr_t, Mfr_b, s_t, s_b, w_tf, psi, fv, V_tf
+
+    @staticmethod
     def cl_8_5_1_EndPanel(c, d, tw, fyw, bf, tf, fyf, Nf, gamma_mo, A_v, tau_b, V_p):
         '''The design of end panels in girders in which the interior
         panel (panel A) is designed using tension field action
@@ -1427,6 +1532,128 @@ class IS800_2007(object):
             return True
         else:   
             return False
+
+    @staticmethod   
+    def cl_8_6_1_1_and_8_6_1_2_web_thickness_check(d, tw, eps, stiffener_type, c=None):
+        """
+        Check minimum web thickness requirements as per IS 800:2007 Cl. 8.6.1.1 & 8.6.1.2
+
+        Parameters:
+        d (float): Depth of web (mm)
+        tw (float): Thickness of web (mm)
+        eps (float): ε = sqrt(250/fy) where fy is yield strength of steel (N/mm^2)
+        stiffener_type (str): Type of stiffening provided. Options:
+            - "no_stiffener"
+            - "transverse_only"
+            - "transverse_and_two_longitudinal_neutral"
+            - "transverse_and_one_longitudinal_compression"
+        c (float): Spacing of transverse stiffeners (mm), required for some types
+
+        Returns:
+        dict: Dictionary with result of the web thickness check.
+        """
+
+        results = {}
+        # print(stiffener_type)
+        if stiffener_type == "no_stiffener" or c > 3 * d:
+            ratio = d / tw
+            # print("Web Ratio:", ratio)
+            limit_serv = 200 * eps
+            limit_buckling = 345 * (eps ** 2)
+            limit = min(limit_serv, limit_buckling)
+            results["Limit"] = limit
+            if ratio <= limit:
+                return True
+            else:
+                return False
+
+        elif stiffener_type == "transverse_only":
+            if c is None:
+
+                return False #{"Error": "Spacing 'c' is required for 'transverse_only' stiffeners."}
+            # print("c:", c, "d:", d, "tw:", tw, "eps:", eps)
+            if 3 * d >= c and c >= 1.5 * d:
+                ratio_serv = d / tw
+                ratio_buckling = d / tw
+                limit_serv = 200 * eps
+                limit_buckling = 345 * (eps ** 2)
+            elif 1.5 * d > c and c >= d:
+                ratio_serv = d / tw
+                ratio_buckling = d / tw
+                limit_serv = 200 * eps
+                limit_buckling = 345 * eps
+            elif 0.74 * d <= c and c < d:
+                ratio_serv = c / tw
+                ratio_buckling = d / tw
+                limit_serv = 200 * eps
+                limit_buckling = 345 * eps
+            elif c < 0.74 * d:
+                ratio_serv = d / tw
+                ratio_buckling = d / tw
+                limit_serv = 270 * eps
+                limit_buckling = 345 * eps
+            else:
+                # print('Transverse only')
+                return False #{"Error": "Invalid range for spacing 'c'."}
+
+
+            if ratio_serv <= limit_serv and ratio_buckling <= limit_buckling:
+                return True
+            else:
+                return False
+
+        elif stiffener_type == "transverse_and_two_longitudinal_neutral":
+            if c >= 1.5 * d :
+                ratio = d / tw
+                limit_serv = 400 * eps
+                limit_buckling = 345 * (eps ** 2)
+                limit = min(limit_serv, limit_buckling)
+
+            else:
+                ratio = d / tw
+                limit_serv = 400 * eps
+                limit_buckling = 345 * eps
+                limit = min(limit_serv, limit_buckling)
+
+            if ratio <= limit:
+                return True
+            else:
+                return False
+
+        elif stiffener_type == "transverse_and_one_longitudinal_compression":
+            if c is None:
+                return False #{"Error": "Spacing 'c' is required for compression flange restraint."}
+
+            if 2.4 * d >= c and c >= 1.5 * d:
+                ratio_serv = d / tw
+                ratio_buckling = d / tw
+                limit_serv = 250 * eps
+                limit_buckling = 345 * (eps ** 2)
+            elif 1.5 * d > c and c >= d:
+                ratio_serv = d / tw
+                ratio_buckling = d / tw
+                limit_serv = 250 * eps
+                limit_buckling = 345 * eps
+            elif 0.74 * d <= c and c < d:
+                ratio_serv = c / tw
+                ratio_buckling = d / tw
+                limit_serv = 250 * eps
+                limit_buckling = 345 * eps
+            elif c < 0.74 * d:
+                ratio_serv = d / tw
+                ratio_buckling = d / tw
+                limit_serv = 340 * eps
+                limit_buckling = 345 * eps
+            else:
+                return False #{"Error": "Invalid range for spacing 'c'."}
+
+            if ratio_serv <= limit_serv and ratio_buckling <= limit_buckling:
+                return True
+            else:
+                return False
+
+        else:
+            return False #{"Error": "Invalid stiffener_type provided."}
 
     # ==========================================================================
     """    SECTION  9     MEMBER SUBJECTED TO COMBINED FORCES   """

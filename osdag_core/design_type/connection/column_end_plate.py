@@ -25,6 +25,7 @@ class ColumnEndPlate(MomentConnection):
 
     def __init__(self):
         super(ColumnEndPlate, self).__init__()
+        self.hover_dict = {}
         self.design_status = False
 
 
@@ -225,45 +226,55 @@ class ColumnEndPlate(MomentConnection):
     ####################################
 
     def set_osdaglogger(self, key):
-
         """
         Function to set Logger for FinPlate Module
         """
+        # @author Arsil Zunzunia
+
         # Set Custom logger
         logging.setLoggerClass(CustomLogger)
 
-        self.logger = logging.getLogger('Osdag')
+        # Create unique logger name per instance
+        unique_logger_name = 'Osdag_ctc_end_plate_moment_connection'
+        self.logger = logging.getLogger(unique_logger_name)
 
         if not isinstance(self.logger, CustomLogger):
-            logging.getLogger('Osdag').manager.loggerDict.pop('Osdag', None)
-            # clear any existing handlers
-            self.logger = logging.getLogger('Osdag')
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
         
+        # Clear any existing handlers
         self.logger.handlers.clear()
-
         self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        # handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        handler = logging.FileHandler('logging_text.log')
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-        # handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        # handler.setLevel(logging.INFO)
-        # formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
-        # handler.setFormatter(formatter)
-        #self.logger.addHandler(handler)
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            # handler.setLevel(logging.DEBUG)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
 
     def module_name(self):
         return KEY_DISP_COLUMNENDPLATE
@@ -574,6 +585,52 @@ class ColumnEndPlate(MomentConnection):
         out_list.append(t26)
         # t22 = (KEY_OUT_STIFFENER_DETAILS,KEY_OUT_DISP_STIFFENER_DETAILS,TYPE_OUT_BUTTON, ['Stiffener Details',self.stiffener_details], True)
         # out_list.append(t22)
+        
+        # Populate hover dict
+
+        # Column
+        self.hover_dict["Column"] = (
+            f"<b>Column</b><br>"
+            f"Section: {self.section.designation if flag else ''}<br>"
+            f"Depth: {self.section.depth if flag else ''} mm<br>"
+            f"Flange Width: {self.section.flange_width if flag else ''} mm<br>"
+            f"Web Thickness: {self.section.web_thickness if flag else ''} mm<br>"
+            f"Flange Thickness: {self.section.flange_thickness if flag else ''} mm"
+        )
+
+        # End Plate
+        self.hover_dict["Plate"] = (
+            f"<b>End Plate</b><br>"
+            f"Width: {self.plate_width if flag else ''} mm<br>"
+            f"Height: {self.plate_height if flag else ''} mm<br>"
+            f"Thickness: {self.plate_thickness_provided if flag else ''} mm<br>"
+            f"Moment Capacity: {round(self.m_dp_prov / 1e6, 2) if flag else ''} kNm"
+        )
+
+        # Bolts
+        self.hover_dict["Bolt"] = (
+            f"<b>Bolts</b><br>"
+            f"Diameter: {self.bolt_diam_provided if flag else ''} mm<br>"
+            f"Grade: {self.bolt_grade_provided if flag else ''}<br>"
+            f"Total Bolts: {self.no_bolts if flag else ''}<br>"
+            f"Shear Capacity: {round(self.bolt_cap / 1000, 2) if flag else ''} kN"
+        )
+
+        # Welds
+        self.hover_dict["Weld"] = (
+            f"<b>Weld</b><br>"
+            f"Type: {self.weld_type if flag else ''}<br>"
+            f"Stiffener Weld Type: Groove Weld<br>"
+            f"Weld Size: {self.weld_size_prov if flag else ''} mm"
+        )
+
+        # Stiffener
+        self.hover_dict["Stiffener"] = (
+            f"<b>Stiffener Plate</b><br>"
+            f"Height: {self.stiff_ht if flag else ''} mm<br>"
+            f"Width: {self.stiff_wt if flag else ''} mm<br>"
+            f"Thickness: {self.t_s if flag else ''} mm"
+        )
 
         return out_list
 
@@ -615,8 +672,8 @@ class ColumnEndPlate(MomentConnection):
 
         return lst
 
-    def out_stiffener(self):
-        conn_type = self[0]
+    def out_stiffener(self, args):
+        conn_type = args[0]
         if conn_type != 'Extended Both Ways':
             return True
         else:
@@ -1729,13 +1786,16 @@ class ColumnEndPlate(MomentConnection):
         return components
 
     def call_3DPlate(self, ui, bgcolor):
+        ui = getattr(ui, "ui", ui)
         from PyQt5.QtWidgets import QCheckBox
         from PyQt5.QtCore import Qt
-        for chkbox in ui.frame.children():
-            if chkbox.objectName() == 'End Plate':
-                continue
-            if isinstance(chkbox, QCheckBox):
-                chkbox.setChecked(Qt.Unchecked)
+        frame = getattr(ui, "frame", None)
+        if frame:
+            for chkbox in frame.children():
+                if chkbox.objectName() == 'Column End Plate':
+                    continue
+                if isinstance(chkbox, QCheckBox):
+                    chkbox.setChecked(Qt.Unchecked)
         ui.commLogicObj.display_3DModel("Connector", bgcolor)
 
 #####################################################################
@@ -2365,7 +2425,6 @@ class ColumnEndPlate(MomentConnection):
 
         CreateLatex.save_latex(CreateLatex(), self.report_input, self.report_check, popup_summary, fname_no_ext,
                                    rel_path, Disp_2d_image, Disp_3d_image, module=self.module)
-        return True
 
 
 # def save_latex(self, uiObj, Desigxn_Check, reportsummary, filename, rel_path, Disp_3d_image):

@@ -12,8 +12,6 @@ from ...utils.common import is800_2007
 from ...utils.common.component import *
 
 import logging
-import sys
-import os
 from ..connection.moment_connection import MomentConnection
 from ...utils.common.material import *
 from ...Report_functions import *
@@ -21,14 +19,15 @@ from ...design_report.reportGenerator_latex import CreateLatex
 from ...custom_logger import CustomLogger
 from pylatex.utils import NoEscape
 
-
 class Compression(Member):
 
     def __init__(self):
         # print(f"Here Compression")
         super(Compression, self).__init__()
         self.design_status = False
-        self.logger = None
+        self.hover_dict = {}
+        # To avoid duplicate "Length provided is within the limit allowed" logs
+        self._logged_length_check = False
 
     ###############################################
     # Design Preference Functions Start
@@ -264,77 +263,80 @@ class Compression(Member):
 
         return val
 
-    def weld_values(self, input_dictionary):
-        # Get fu value from selected material if available
-        fu = ''
-        if input_dictionary and KEY_MATERIAL in input_dictionary:
-            if input_dictionary[KEY_MATERIAL] != 'Select Material':
-                fu = Material(input_dictionary[KEY_MATERIAL], 41).fu
-
-        values = {
-            KEY_DP_WELD_FAB: KEY_DP_FAB_SHOP,
-            KEY_DP_WELD_MATERIAL_G_O: str(fu) if fu else '410',  # Default to 410 if no material selected
-        }
-
-        # Update values from input dictionary if available
-        for key in values.keys():
-            if input_dictionary and key in input_dictionary:
-                values[key] = input_dictionary[key]
-
-        weld = []
-
-        t3 = (KEY_DP_WELD_FAB, "Fabrication", TYPE_COMBOBOX,
-            KEY_DP_WELD_FAB_VALUES, 
-            values[KEY_DP_WELD_FAB])
-        weld.append(t3)
-
-        t2 = (KEY_DP_WELD_MATERIAL_G_O, "Material Grade Overwrite, Fu (MPa)", TYPE_TEXTBOX,
-            None, 
-            values[KEY_DP_WELD_MATERIAL_G_O])
-        weld.append(t2)
-        return weld
-
     ####################################
     # Design Preference Functions End
     ####################################
 
     def module_name(self):
-        return KEY_DISP_COMPRESSION_Strut
+        return KEY_DISP_STRUT_WELDED_END_GUSSET
 
     def set_osdaglogger(self, key):
         """
-        Function to set Logger for Compression Member Module
-        Similar to FinPlateConnection for web compatibility
+        Function to set Logger for FinPlate Module
         """
+        # @author Arsil Zunzunia
+
         # Set Custom logger
         logging.setLoggerClass(CustomLogger)
 
-        self.logger = logging.getLogger('Osdag')
+        # Create unique logger name per instance
+        unique_logger_name = 'Osdag_struts_weld_end_gusset_compress_member'
+        self.logger = logging.getLogger(unique_logger_name)
 
         if not isinstance(self.logger, CustomLogger):
-            logging.getLogger('Osdag').manager.loggerDict.pop('Osdag', None)
-            # clear any existing handlers
-            self.logger = logging.getLogger('Osdag')
+            logging.getLogger(unique_logger_name).manager.loggerDict.pop(unique_logger_name, None)
+            self.logger = logging.getLogger(unique_logger_name)
         
+        # Clear any existing handlers
         self.logger.handlers.clear()
-
         self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        
+        # Shared formatter for all handlers
+        formatter = logging.Formatter(
+            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # ---------- CONSOLE HANDLER ----------
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        handler = logging.FileHandler('logging_text.log')
+        # ---------- FILE HANDLER (CLEAR & RESTART LOG) ----------
+        log_dir = Path("ResourceFiles") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"{unique_logger_name}.log"
+        
+        file_handler = logging.FileHandler(
+            log_file_path,
+            mode="w",          # clears previous log
+            encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-        formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
+        # ---------- GUI HANDLER ----------
         if key is not None:
-            handler = OurLog(key)
-            formatter = logging.Formatter(fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
+            gui_handler = OurLog(key)
+            gui_handler.setFormatter(formatter)
+            self.logger.addHandler(gui_handler)
+
+    def safe_log(self, level, message):
+        """
+        Safely log a message, catching RuntimeError if the Qt widget handler
+        has been deleted (e.g., log window was closed).
+        """
+        try:
+            if level == 'info':
+                self.logger.info(message)
+            elif level == 'warning':
+                self.logger.warning(message)
+            elif level == 'error':
+                self.logger.error(message)
+        except RuntimeError:
+            # Qt widget handler was deleted - ignore silently
+            # Other handlers (StreamHandler, FileHandler) will still work
+            pass
 
     def customized_input(self):
 
@@ -363,10 +365,10 @@ class Compression(Member):
         '''
 
         # @author: Amir, Umair
-        self.module = KEY_DISP_COMPRESSION_Strut
+        self.module = KEY_DISP_STRUT_WELDED_END_GUSSET
         options_list = []
 
-        t1 = (KEY_MODULE, KEY_DISP_COMPRESSION_Strut, TYPE_MODULE, None, True, 'No Validator')
+        t1 = (KEY_MODULE, KEY_DISP_STRUT_WELDED_END_GUSSET, TYPE_MODULE, None, True, 'No Validator')
         options_list.append(t1)
 
         t1 = (None, KEY_SECTION_DATA, TYPE_TITLE, None, True, 'No Validator')
@@ -491,7 +493,7 @@ class Compression(Member):
 
         pattern = []
 
-        t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern - 2 x 3 Bolts pattern considered")
+        t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern")
         pattern.append(t00)
 
         t99 = (None, 'Failure Pattern due to Tension in Member', TYPE_IMAGE,
@@ -504,7 +506,7 @@ class Compression(Member):
 
         pattern = []
 
-        t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern - 2 x 3 Bolts pattern considered")
+        t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern")
         pattern.append(t00)
 
         t99 = (None, 'Failure Pattern due to Tension in Plate', TYPE_IMAGE,
@@ -513,9 +515,9 @@ class Compression(Member):
 
         return pattern
 
-    def fn_end1_end2(self):
+    def fn_end1_end2(self, arg):
 
-        end1 = self[0]
+        end1 = arg[0]
         if end1 == 'Fixed':
             return VALUES_STRUT_END2
         elif end1 == 'Free':
@@ -525,21 +527,21 @@ class Compression(Member):
         elif end1 == 'Roller':
             return ['Fixed', 'Hinged']
 
-    def fn_end1_image(self):
+    def fn_end1_image(self, arg):
 
-        if self == 'Fixed':
+        if arg == 'Fixed':
             return str(files("osdag_core.data.ResourceFiles.images").joinpath("RRRRstrut.png"))
-        elif self == 'Free':
+        elif arg == 'Free':
             return str(files("osdag_core.data.ResourceFiles.images").joinpath("RRRRstrut.png"))
-        elif self == 'Hinged':
+        elif arg == 'Hinged':
             return str(files("osdag_core.data.ResourceFiles.images").joinpath("RRRFstrut.png"))
-        elif self == 'Roller':
+        elif arg == 'Roller':
             return str(files("osdag_core.data.ResourceFiles.images").joinpath("RRRRstrut.png"))
 
-    def fn_end2_image(self):
+    def fn_end2_image(self, arg):
 
-        end1 = self[0]
-        end2 = self[1]
+        end1 = arg[0]
+        end2 = arg[1]
 
         if end1 == 'Fixed':
             if end2 == 'Fixed':
@@ -565,10 +567,10 @@ class Compression(Member):
             elif end2 == 'Hinged':
                 return str(files("osdag_core.data.ResourceFiles.images").joinpath("RRRRstrut.png"))
 
-    def fn_conn_image(self):
+    def fn_conn_image(self, arg):
 
         "Function to populate section images based on the type of section "
-        img = self[0]
+        img = arg[0]
         if img == VALUES_SEC_PROFILE_Compression_Strut[0]:
             return VALUES_IMG_STRUT[0]
         elif img ==VALUES_SEC_PROFILE_Compression_Strut[1]:
@@ -582,15 +584,9 @@ class Compression(Member):
             return VALUES_IMG_TENSIONBOLTED[4]
 
 
-    def fn_profile_section(self, args=None):
-        #print(f"fn_profile_section self {self}")
-        # Use provided argument or fall back to self[0]
-        if args and len(args) > 0:
-            profile = args[0]
-        else:
-            profile = self[0]
-        # print(f'profile = {self[0]}'
-        #       f'VALUES_SEC_PROFILE_Compression_Strut {VALUES_SEC_PROFILE_Compression_Strut}')
+    def fn_profile_section(self, arg=None):
+        profile = arg[0]
+            
         if profile == 'Beams':
             return connectdb("Beams", call_type="popup")
         elif profile == 'Columns':
@@ -695,6 +691,7 @@ class Compression(Member):
         t1 = (KEY_DESIGN_STRENGTH_COMPRESSION, KEY_DISP_DESIGN_STRENGTH_COMPRESSION, TYPE_TEXTBOX, round(self.result_capacity * 1e-3, 2) if flag else
         '', True)
         out_list.append(t1)
+
         
 
         t8 = (None, DISP_TITLE_END_CONNECTION, TYPE_TITLE, None, True)
@@ -767,6 +764,9 @@ class Compression(Member):
         out_list.append(t21)
 
         
+
+     
+
 
         # t19 = (KEY_OUT_PLATETHK, KEY_OUT_DISP_PLATETHK, TYPE_TEXTBOX,
         #        int(round(22.02, 0)) if flag else '', True)
@@ -906,6 +906,22 @@ class Compression(Member):
         #        int(round(self.inter_plate_length, 0)) if flag else '', False)
         # out_list.append(t21)
 
+        # Populate Hover Dict (Compression Member)
+        self.hover_dict["Weld"] = (
+            f"<b>Weld</b><br>"
+            f"Size: {self.weld.size if (flag and hasattr(self.weld, 'size')) else ''} mm<br>"
+            f"Strength: {round(self.weld.strength, 2) if (flag and hasattr(self.weld, 'strength')) else ''} N/mm²<br>"
+            f"Stress: {round(self.weld.stress, 2) if (flag and hasattr(self.weld, 'stress')) else ''} N/mm<br>"
+            f"Eff. Length: {int(round(self.weld.length, 0)) if (flag and hasattr(self.weld, 'length')) else ''} mm"
+        )
+
+        self.hover_dict["Plate"] = (
+            f"Plate: {float(self.plate.length) if (flag and hasattr(self.plate, 'length')) else ''} mm x "
+            f"{float(self.plate.height) if (flag and hasattr(self.plate, 'height')) else ''} mm x "
+            f"{self.plate.thickness_provided if (flag and hasattr(self.plate, 'thickness_provided')) else ''} mm"
+        )
+
+        self.hover_dict["Member"] = f"Member: {self.result_designation if (flag and hasattr(self, 'result_designation')) else ''}"
 
         return out_list
     def func_for_validation(self, design_dictionary):
@@ -918,34 +934,27 @@ class Compression(Member):
             self.set_osdaglogger(None)
         
         flag = False
-        flag1 = False
-        flag2 = False
-        option_list = self.input_values(self)
+        flag1 = False  # length > 0
+        flag2 = False  # axial force > 0
+        option_list = self.input_values()
         print(f'\n func_for_validation ' #option list = {option_list}
               f'\n  design_dictionary {design_dictionary}')
         missing_fields_list = []
         for option in option_list:
             if option[2] == TYPE_TEXTBOX:
-                # print(f"\n option {option}")
-                if design_dictionary[option[0]] == '' and option[0] is not KEY_AXIAL:
-                    # print(f'option, design_dictionary[option[0] = {option[0]},{design_dictionary[option[0]]}')
-                    # if design_dictionary[KEY_AXIAL] == '':
-                    #     continue
-                    # else:
+                # Any empty textbox (including axial force) is treated as a missing field,
+                # consistent with tension_welded.py behaviour.
+                if design_dictionary[option[0]] == '':
                     missing_fields_list.append(option[1])
-                elif design_dictionary[option[0]] == '' and option[0] is KEY_AXIAL:
-                    flag2 = True
                 else:
-                    if option[0] == KEY_LENGTH :
+                    if option[0] == KEY_LENGTH:
                         if float(design_dictionary[option[0]]) <= 0.0:
-                            # print("Input value(s) cannot be equal or less than zero.")
                             error = "Input value(s) cannot be equal or less than zero."
                             all_errors.append(error)
                         else:
                             flag1 = True
-                    elif option[0] == KEY_AXIAL :
+                    elif option[0] == KEY_AXIAL:
                         if float(design_dictionary[option[0]]) <= 0.0:
-                            #print("Input value(s) cannot be equal or less than zero.")
                             error = "Input value(s) cannot be equal or less than zero."
                             all_errors.append(error)
                         else:
@@ -955,33 +964,42 @@ class Compression(Member):
                 if design_dictionary[option[0]] == val[0]:
                     # print(f'option[0] = {option[0]}')
                     missing_fields_list.append(option[1])
-        # print(missing_fields_list)
+        # If any mandatory fields are missing, create a single combined error string,
+        # same pattern as tension_welded.py
         if len(missing_fields_list) > 0:
-
-            error = self.generate_missing_fields_error_string(self,missing_fields_list)
+            error = self.generate_missing_fields_error_string(missing_fields_list)
             all_errors.append(error)
-            # flag = False
         else:
             flag = True
 
-        #print(f'flag = {flag}')
-        if flag:
-            print(f"\n design_dictionary{design_dictionary}")
-            self.set_input_values(design_dictionary)
-            if self.design_status ==False and len(self.failed_design_dict)>0:
-                self.logger.error(
-                    "Design Failed, Check Design Report"
-                )
-                return # ['Design Failed, Check Design Report'] @TODO
-            elif self.design_status:
-                pass
-            else:
-                self.logger.error(
-                    "Design Failed. Slender Sections Selected"
-                )
-                return # ['Design Failed. Slender Sections Selected']
-        else:
+        # If there are missing fields OR non‑positive length/axial force, return errors
+        # and DO NOT proceed to design.
+        if not (flag and flag1 and flag2):
             return all_errors
+
+        # -------------------------------
+        # Run design and handle failures
+        # -------------------------------
+        print(f"\n design_dictionary{design_dictionary}")
+        self.set_input_values(design_dictionary)
+
+        # Guard against None / missing failed_design_dict to avoid crashes
+        failed_dict = getattr(self, "failed_design_dict", None)
+
+        if not self.design_status:
+            # Design has failed somewhere in the member / weld / plate checks.
+            # If we have a "best failed" section stored, log a concise summary,
+            # otherwise rely on the detailed messages already logged by the
+            # internal check functions (to avoid redundant generic errors).
+            if failed_dict:
+                self.safe_log('error',
+                    "Compression member design failed. No section from the given list satisfies the "
+                    "utilization ratio / slenderness limits as per IS 800:2007. "
+                    "Refer to the design report for the best failing section and detailed checks."
+                )
+            return  # do NOT raise an exception
+
+        # If we reach here, design_status is True – validation is successful
         print(f"func_for_validation done")
 
 
@@ -992,12 +1010,18 @@ class Compression(Member):
         t1 = ('Model', self.call_3DModel)
         components.append(t1)
 
+        t2 = ('Member', self.call_3DMember)
+        components.append(t2)
+
+        t3 = ('Plate', self.call_3DPlate)
+        components.append(t3)
+
         return components
 
-    def fn_conn_type(self):
+    def fn_conn_type(self, arg):
 
         "Function to populate section size based on the type of section "
-        conn = self[0]
+        conn = arg[0]
         if conn in VALUES_SEC_PROFILE_Compression_Strut:
             return VALUES_LOCATION_1
         else:
@@ -1009,8 +1033,10 @@ class Compression(Member):
         super(Compression,self).set_input_values(design_dictionary)
         #self.sizelist == self.sec_list
         # section properties
+        # Reset per‑design flags
+        self._logged_length_check = False
         self.module = design_dictionary[KEY_MODULE]
-        self.mainmodule = 'Struts in Trusses'
+        self.mainmodule = KEY_DISP_STRUT_WELDED_END_GUSSET
         self.sizelist = design_dictionary[KEY_SECSIZE]
         self.sec_profile = design_dictionary[KEY_SEC_PROFILE]
         self.sec_list = design_dictionary[KEY_SECSIZE]
@@ -1166,15 +1192,27 @@ class Compression(Member):
         self.failed_design_dict = {}
         flag = self.section_classification()
         if len(self.input_section_list) == 0:
-            flag == False
-        if flag:
-            self.design()
-            self.results()
-        else:
+            flag = False
+
+        # If no trial section passes the initial IS 800:2007 checks (typically because
+        # the provided length is too large for all available sections based on
+        # slenderness limits), log a clear message instead of silently doing nothing.
+        if not flag:
+            self.safe_log('warning',
+                "Length provided is beyond the limit allowed for all available sections "
+                "[Reference: Cl 3.8, IS 800:2007]."
+            )
+            self.safe_log('info',
+                "Reduce the member length and/or select sections with a higher radius of "
+                "gyration value, then re‑design."
+            )
             self.design_status = False
-            self.optimum_section_ur = []
-            self.optimum_section_ur_results = {}
-            self.results()
+            self.design_status_list.append(self.design_status)
+            return
+
+        # Proceed with full design when at least one section passes initial checks
+        self.design()
+        self.results()
 
 
         # self.initial_member_capacity(self,design_dictionary)
@@ -1535,8 +1573,8 @@ class Compression(Member):
 
 
             if len(self.allowed_sections) == 0 or len(self.sec_list) == 0:
-                self.logger.warning("Select at-least one type of section in the design preferences tab.")
-                self.logger.error("Cannot compute. Selected section classification type is Null.")
+                self.safe_log('warning', "Select at-least one type of section in the design preferences tab.")
+                self.safe_log('error', "Cannot compute. Selected section classification type is Null.")
                 self.design_status = False
                 self.design_status_list.append(self.design_status)
                 local_flag = False
@@ -1546,6 +1584,35 @@ class Compression(Member):
                 self.input_section_classification.update({trial_section: self.section_property.section_class})
                 # if self.sec_profile != Profile_name_1:
                 self.sec_prop_initial_dict.update({trial_section : (self.section_property.section_class, min_radius_gyration, slenderness, effective_area)}) #, self.width_thickness_ratio,self.depth_thickness_ratio,self.width_depth_thickness_ratio
+
+        # If no section passes the slenderness check, provide a clear message similar
+        # to the tension member modules, based on the maximum radius of gyration
+        # available in the current section list.
+        if len(self.input_section_list) == 0 and len(self.sec_prop_initial_dict) > 0:
+            limit = IS800_2007.cl_3_8_max_slenderness_ratio(1)
+            max_L_allow = 0.0
+            max_L_sec = None
+            for sec, (_, r_min, _, _) in self.sec_prop_initial_dict.items():
+                # allowable length for this section from slenderness limit
+                L_allow = (limit * r_min) / self.K if self.K > 0 else 0.0
+                if L_allow > max_L_allow:
+                    max_L_allow = L_allow
+                    max_L_sec = sec
+
+            if max_L_sec is not None and self.length > max_L_allow:
+                self.logger.warning(
+                    " : The member length ({} mm) exceeds the maximum allowable length ({} mm) with respect to the "
+                    "maximum available member size {}.".format(
+                        round(self.length, 2), round(max_L_allow, 2), max_L_sec
+                    )
+                )
+                self.logger.info(
+                    " : Select member(s) with a higher radius of gyration value and/or reduce the member length."
+                )
+                self.design_status = False
+                self.design_status_list.append(self.design_status)
+                local_flag = False
+
         # print(f" sectopn class done {self.sec_list}")
         return local_flag
             # print(f"self.section_property.section_class{self.section_property.section_class}")
@@ -1554,41 +1621,41 @@ class Compression(Member):
     #  ======Calculations start here====== #
     def optimization_tab_check(self):
         if (self.allowable_utilization_ratio <= 0.10) or (self.allowable_utilization_ratio > 1.0):
-            self.logger.warning(
+            self.safe_log('warning',
                 "The defined value of Utilization Ratio in the design preferences tab is out of the suggested range.")
-            self.logger.info("Provide an appropriate input and re-design.")
-            self.logger.info("Assuming a default value of 1.0.")
+            self.safe_log('info', "Provide an appropriate input and re-design.")
+            self.safe_log('info', "Assuming a default value of 1.0.")
             self.allowable_utilization_ratio = 1.0
             self.design_status = False
             self.design_status_list.append(self.design_status)
 
         elif (self.effective_area_factor <= 0.10) or (self.effective_area_factor > 1.0):
-            self.logger.warning(
+            self.safe_log('warning',
                 "The defined value of Effective Area Factor in the design preferences tab is out of the suggested range.")
-            self.logger.info("Provide an appropriate input and re-design.")
-            self.logger.info("Assuming a default value of 1.0.")
+            self.safe_log('info', "Provide an appropriate input and re-design.")
+            self.safe_log('info', "Assuming a default value of 1.0.")
             self.effective_area_factor = 1.0
             self.design_status = False
             self.design_status_list.append(self.design_status)
 
         elif (self.steel_cost_per_kg < 0.10) or (self.effective_area_factor > 1.0):
             # No suggested range in Description
-            self.logger.warning(
+            self.safe_log('warning',
                 "The defined value of the cost of steel (in INR) in the design preferences tab is out of the suggested range.")
-            self.logger.info("Provide an appropriate input and re-design.")
-            self.logger.info("Assuming a default rate of 50 (INR/kg).")
+            self.safe_log('info', "Provide an appropriate input and re-design.")
+            self.safe_log('info', "Assuming a default rate of 50 (INR/kg).")
             self.steel_cost_per_kg = 50
             self.design_status = False
             self.design_status_list.append(self.design_status)
         else:
-            self.logger.info("Provided appropriate design preference, now checking input.")
+            self.safe_log('info', "Provided appropriate design preference, now checking input.")
 
     def section_classification_subchecks(self, section):
         if self.sec_profile == Profile_name_1 or self.sec_profile == Profile_name_2 or self.sec_profile == Profile_name_3:  # Angles
             self.section_property = Angle(designation = section, material_grade = self.material)
         # elif self.sec_profile == VALUES_SEC_PROFILE_Compression_Strut[1]:  # Back to Back Angles
         #     self.section_property = Angle(designation=section, material_grade=self.material)
-        elif self.sec_profile == VALUES_SEC_PROFILE_Compression_Strut[3] or self.sec_profile == VALUES_SEC_PROFILE_Compression_Strut[3]:  # Channels
+        elif self.sec_profile in ['Channels', 'Back to Back Channels']:  # Channels
             print(f"section_classification_subchecks error ")
             # self.section_property = Channel(designation=section, material_grade=self.material)
         # # elif self.sec_profile == VALUES_SEC_PROFILE[3]:  # Columns
@@ -1604,7 +1671,7 @@ class Compression(Member):
 
     def common_checks_1(self, section, step = 1, list_result = [], list_1 = []):
         if step == 1:
-            # print(f"Working correct here{section}")
+            #             print(f"Working correct here{section}")
             print(section)
             print(self.sec_profile)
 
@@ -1734,17 +1801,23 @@ class Compression(Member):
         self.section_classification_subchecks(self.result_designation)
         
         limit = IS800_2007.cl_3_8_max_slenderness_ratio(1)
+        # Log the slenderness/length check only once per design, even if common_result()
+        # is called multiple times (e.g. from report generation or UI refresh).
         if self.sec_prop_initial_dict[self.result_designation][2] > limit:
-            self.logger.warning("Length provided is beyond the limit allowed. [Reference: Cl 3.8, IS 800:2007]")
-            self.logger.error("Cannot compute. Given Length does not pass for this section.")
+            if not self._logged_length_check:
+                self.logger.warning("Length provided is beyond the limit allowed. [Reference: Cl 3.8, IS 800:2007]")
+                self.logger.error("Cannot compute. Given Length does not pass for this section.")
+                self._logged_length_check = True
             # self.sec_list.remove(self.section_property.designation )
         else:
-            self.logger.info("Length provided is within the limit allowed. [Reference: Cl 3.8, IS 800:2007]" )
-            self.logger.info(
-                "The section is {}. The b/t of the section ({}) is {} and d/t is {} and (b+d)/t is {}.  [Reference: Cl 3.7, IS 800:2007].".format(
-                    self.input_section_classification[self.result_designation], self.result_designation,
-                    round(self.width_thickness_ratio, 2), round_up(self.depth_thickness_ratio),
-                    round(self.width_depth_thickness_ratio, 2)))
+            if not self._logged_length_check:
+                self.logger.info("Length provided is within the limit allowed. [Reference: Cl 3.8, IS 800:2007]" )
+                self.logger.info(
+                    "The section is {}. The b/t of the section ({}) is {} and d/t is {} and (b+d)/t is {}.  [Reference: Cl 3.7, IS 800:2007].".format(
+                        self.input_section_classification[self.result_designation], self.result_designation,
+                        round(self.width_thickness_ratio, 2), round_up(self.depth_thickness_ratio),
+                        round(self.width_depth_thickness_ratio, 2)))
+                self._logged_length_check = True
 
 
         self.result_section_class = list_result[result_type]['Section class']
@@ -1849,7 +1922,7 @@ class Compression(Member):
     #     return self.section_size_max.tension_yielding_capacity, self.max_length, self.section_size_max.slenderness,self.min_radius_gyration
 
     def design(self):
-        # flag = self.section_classification(self)
+        # flag = self.section_classification()
         # print(flag)
         """ Perform design of struct """
         # checking DP inputs
@@ -1868,7 +1941,7 @@ class Compression(Member):
         #    self.strength_of_strut(self)
         #if design_dictionary[KEY_AXIAL] != '' : #TODO: Parth to confirm if this code is needed
         if len(self.input_section_list) >= 1 :
-            self.logger.info("Provided appropriate input and starting design.")
+            self.safe_log('info', "Provided appropriate input and starting design.")
 
             self.design_strut()
         #elif len(self.input_section_list) == 1 :
@@ -1882,7 +1955,7 @@ class Compression(Member):
     
         #    self.strength_of_strut(self)
         else:
-            # logger.warning(
+            # self.logger.warning(
             #     "More than 1 section given as input without giving Load")
             self.logger.warning("Cannot compute!")
             self.logger.info("Give 1 valid section as Inputs and/or "
@@ -1916,6 +1989,24 @@ class Compression(Member):
         self.flag = self.section_classification()
 
         print('self.flag:',self.flag)
+
+        # If no trial section passes the initial checks (typically because the
+        # input length is too large for all available sections based on the
+        # slenderness limits of IS 800:2007), stop here with a clear message.
+        if not self.flag and len(self.input_section_list) == 0:
+            self.logger.warning(
+                " : The member length ({} mm) exceeds the allowable length based on the slenderness "
+                "limits for all available sections [Ref. Cl. 3.8, IS 800:2007].".format(
+                    round(self.length, 2)
+                )
+            )
+            self.logger.info(
+                " : Reduce the member length and/or select sections with a higher radius of gyration, "
+                "then re‑design."
+            )
+            self.design_status = False
+            self.design_status_list.append(self.design_status)
+            return
         if self.effective_area_factor < 1.0:
             self.logger.warning(
                 "Reducing the effective sectional area as per the definition in the Design Preferences tab."
@@ -2244,7 +2335,7 @@ class Compression(Member):
             self.flange_weld = round_up(((self.weld.effective - self.web_weld) / 4), 1, 50)
             self.weld.length = (self.web_weld + 4 * self.flange_weld)
 
-        elif design_dictionary[KEY_SEC_PROFILE] in ["Star Angles", "Back to Back Angles"] and design_dictionary[
+        elif design_dictionary[KEY_SEC_PROFILE] in ["Star Angles", Profile_name_2, Profile_name_3] and design_dictionary[
             KEY_LOCATION] == "Long Leg":
             if web == None:
                 self.web_weld = 2 * (self.section_property.max_leg - 2 * self.weld.size)
@@ -2255,7 +2346,7 @@ class Compression(Member):
             self.flange_weld = round_up((length_weld), 1, 50)
             self.weld.length = (self.web_weld + 4 * self.flange_weld)
 
-        elif design_dictionary[KEY_SEC_PROFILE] in ["Star Angles", "Back to Back Angles"] and design_dictionary[
+        elif design_dictionary[KEY_SEC_PROFILE] in ["Star Angles", Profile_name_2, Profile_name_3] and design_dictionary[
             KEY_LOCATION] == "Short Leg":
             if web == None:
                 self.web_weld = 2 * (self.section_property.min_leg - 2 * self.weld.size)
@@ -2266,7 +2357,7 @@ class Compression(Member):
             self.flange_weld = round_up((length_weld), 1, 50)
             self.weld.length = (self.web_weld + 4 * self.flange_weld)
 
-        elif design_dictionary[KEY_SEC_PROFILE] == "Angles" and design_dictionary[KEY_LOCATION] == "Long Leg":
+        elif design_dictionary[KEY_SEC_PROFILE] == Profile_name_1 and design_dictionary[KEY_LOCATION] == "Long Leg":
             if web == None:
                 self.web_weld = (self.section_property.max_leg - 2 * self.weld.size)
             else:
@@ -2291,12 +2382,16 @@ class Compression(Member):
             self.plate.height = 2 * self.section_property.max_leg + max((4 * self.weld.size), 30)
         elif design_dictionary[KEY_SEC_PROFILE] == "Star Angles" and design_dictionary[KEY_LOCATION] == "Short Leg":
             self.plate.height = 2 * self.section_property.min_leg + max((4 * self.weld.size), 30)
-        elif design_dictionary[KEY_SEC_PROFILE] in ["Back to Back Angles", "Angles"] and design_dictionary[KEY_LOCATION] == "Short Leg":
+        elif design_dictionary[KEY_SEC_PROFILE] in [Profile_name_1, Profile_name_2, Profile_name_3] and design_dictionary[KEY_LOCATION] == "Short Leg":
             self.plate.height = self.section_property.min_leg + max((4 * self.weld.size), 30)
-        elif design_dictionary[KEY_SEC_PROFILE] in ["Back to Back Angles", "Angles"] and design_dictionary[KEY_LOCATION] == "Long Leg":
+        elif design_dictionary[KEY_SEC_PROFILE] in [Profile_name_1, Profile_name_2, Profile_name_3] and design_dictionary[KEY_LOCATION] == "Long Leg":
             self.plate.height = self.section_property.max_leg + max((4 * self.weld.size), 30)
-        else:
+        elif design_dictionary[KEY_SEC_PROFILE] in ['Channels', 'Back to Back Channels']:
+            # For Channels, use depth attribute
             self.plate.height = self.section_property.depth + max((4 * self.weld.size), 30)
+        else:
+            # Default fallback for angles
+            self.plate.height = self.section_property.max_leg + max((4 * self.weld.size), 30)
 
     def get_plate_thickness(self, design_dictionary):
         """
@@ -2558,76 +2653,59 @@ class Compression(Member):
             self.result_cost = self.optimum_section_cost[0]
 
         if len(self.optimum_section_ur) == 0:
+            # No section met the UR limit at all
             self.design_status = False
         
-        else:
-            if self.optimization_parameter == 'Utilization Ratio':
-                print(f" self.optimum_section_ur_results {self.optimum_section_ur_results}")
-                self.common_result(list_result=self.optimum_section_ur_results, result_type=self.result_UR)
-            else:
-                self.result_UR = self.optimum_section_cost_results[self.result_cost]['UR']
+        elif self.optimization_parameter != 'Utilization Ratio':
+            # Cost‑based optimisation path (UR-based path already called common_result above)
+            self.result_UR = self.optimum_section_cost_results[self.result_cost]['UR']
 
-                # checking if the selected section based on cost satisfies the UR
-                if self.result_UR > min(self.allowable_utilization_ratio, 1.0):
+            # Check if cost‑optimal section also satisfies UR
+            if self.result_UR > min(self.allowable_utilization_ratio, 1.0):
 
-                    trial_cost = []
-                    for cost in self.optimum_section_cost:
-                        self.result_UR = self.optimum_section_cost_results[cost]['UR']
-                        if self.result_UR <= min(self.allowable_utilization_ratio, 1.0):
-                            trial_cost.append(cost)
+                trial_cost = []
+                for cost in self.optimum_section_cost:
+                    self.result_UR = self.optimum_section_cost_results[cost]['UR']
+                    if self.result_UR <= min(self.allowable_utilization_ratio, 1.0):
+                        trial_cost.append(cost)
 
-                    trial_cost.sort()
+                trial_cost.sort()
 
-                    if len(trial_cost) == 0:  # no design was successful
-                        self.logger.warning("The sections selected by the solver from the defined list of sections did not satisfy the Utilization Ratio (UR) "
-                                        "criteria")
-                        self.logger.error("The solver did not find any adequate section from the defined list.")
-                        self.logger.info("Re-define the list of sections or check the Design Preferences option and re-design.")
-                        self.design_status = False
-                        self.design_status_list.append(self.design_status)
-                        print(f"design_status_list{self.design_status} \n")
-                    else:
-                        self.result_cost = trial_cost[0]  # optimum section based on cost which passes the UR check
-                        self.design_status = True
+                if len(trial_cost) == 0:  # no design was successful
+                    self.logger.warning("The sections selected by the solver from the defined list of sections did not satisfy the Utilization Ratio (UR) "
+                                    "criteria")
+                    self.logger.error("The solver did not find any adequate section from the defined list.")
+                    self.logger.info("Re-define the list of sections or check the Design Preferences option and re-design.")
+                    self.design_status = False
+                    self.design_status_list.append(self.design_status)
+                    print(f"design_status_list{self.design_status} \n")
+                else:
+                    self.result_cost = trial_cost[0]  # optimum section based on cost which passes the UR check
+                    self.design_status = True
 
-                # results
-                self.common_result(list_result=self.optimum_section_cost_results, result_type=self.result_cost)
-                
-                # Proceed with weld and plate design after successful member design
-                if self.design_status:
-                    # Get section capacity from the selected optimum section
-                    self.section_capacity = self.result_capacity
-                    design_dict = {
-                        KEY_SEC_PROFILE: self.sec_profile,
-                        KEY_LOCATION: self.loc,
-                        KEY_PLATETHK: self.plate_thickness
-                    }
-                    self.initial_plate_check(design_dict)
+            # results for cost‑based optimisation
+            self.common_result(list_result=self.optimum_section_cost_results, result_type=self.result_cost)
+            
+            # Proceed with weld and plate design after successful member design
+            if self.design_status:
+                # Get section capacity from the selected optimum section
+                self.section_capacity = self.result_capacity
+                design_dict = {
+                    KEY_SEC_PROFILE: self.sec_profile,
+                    KEY_LOCATION: self.loc,
+                    KEY_PLATETHK: self.plate_thickness
+                }
+                self.initial_plate_check(design_dict)
 
-                print(f"design_status_list2{self.design_status}")
+            print(f"design_status_list2{self.design_status}")
+
+        # Aggregate any design_status flags that may have been set by sub-checks
         for status in self.design_status_list:
             if status is False:
                 self.design_status = False
                 break
             else:
                 self.design_status = True
-            #else:
-            #    logger.warning(
-            #        "More than 1 section given as input without giving Load")
-            #    logger.error("Cannot compute!")
-            #    logger.info("Give 1 section as Inputs and/or "
-            #                "Give load and re-design.")
-            #    self.design_status = False
-            #    self.design_status_list.append(self.design_status)
-
-        if self.design_status:
-            self.logger.info(": ========== Design Status ============")
-            self.logger.info(": Overall Column design is SAFE")
-            self.logger.info(": ========== End Of Design ============")
-        else:
-            self.logger.info(": ========== Design Status ============")
-            self.logger.info(": Overall Column design is UNSAFE")
-            self.logger.info(": ========== End Of Design ============")
         #else: #TODO: Parth to confirm if this code is needed
         #
         #    self.single_result = {}
@@ -2650,9 +2728,6 @@ class Compression(Member):
         # overall design status
 
 
-
-
-    ### start writing save_design from here!
     def save_design(self, popup_summary):
 
         """if self.connectivity == 'Hollow/Tubular Column Base':
@@ -2680,7 +2755,7 @@ class Compression(Member):
             section_type = 'I Section' """
         
         if self.section_property.max_leg == self.section_property.min_leg:
-            if self.sec_profile == "Back to Back Angles":
+            if self.sec_profile in [Profile_name_2, Profile_name_3]:
                 if self.loc == "Long Leg":
                     image = "bblequaldp"
                 else:
@@ -2694,7 +2769,7 @@ class Compression(Member):
                 image = "equaldp"
 
         else:
-            if self.sec_profile == "Back to Back Angles":
+            if self.sec_profile in [Profile_name_2, Profile_name_3]:
                 if self.loc == "Long Leg":
                     image = "bblunequaldp"
                 else:
@@ -2710,7 +2785,7 @@ class Compression(Member):
         if (self.design_status and self.failed_design_dict is None) or (not self.design_status and len(self.failed_design_dict)>0):
             if self.sec_profile == Profile_name_1 or self.sec_profile == Profile_name_2 or self.sec_profile == Profile_name_3:  # Angles and Back to Back Angles
                 self.section_property = Angle(designation = self.result_designation, material_grade = self.material)
-            if self.sec_profile == "Angles" or self.sec_profile == VALUES_SEC_PROFILE_2[0]:
+            if self.sec_profile == Profile_name_1:
                 self.report_column = {KEY_DISP_SEC_PROFILE: image,
                                         KEY_DISP_SECSIZE: (self.section_property.designation, self.sec_profile),
                                         KEY_DISP_MATERIAL: self.section_property.material,
@@ -2841,7 +2916,7 @@ class Compression(Member):
                                 ' ')
             self.report_check.append(t1)
             
-            t1 = ('$\phi$', ' ',
+            t1 = (r'$\phi$', ' ',
                                 cl_8_7_1_5_phi(0.49,round(self.nondimensional_effective_slenderness_ratio, 2), round(self.phi, 2)),#need to check this as its given only for zz but rest are values wrt yy
                                 ' ')
             self.report_check.append(t1)
@@ -2903,7 +2978,7 @@ class Compression(Member):
     #
     #     pattern = []
     #
-    #     t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern - 2 x 3 Bolts pattern considered")
+    #     t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern")
     #     pattern.append(t00)
     #
     #     t99 = (None, 'Failure Pattern due to Tension in Member', TYPE_IMAGE,
@@ -2916,7 +2991,7 @@ class Compression(Member):
     #
     #     pattern = []
     #
-    #     t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern - 2 x 3 Bolts pattern considered")
+    #     t00 = (None, "", TYPE_NOTE, "Representative image for Failure Pattern")
     #     pattern.append(t00)
     #
     #     t99 = (None, 'Failure Pattern due to Tension in Plate', TYPE_IMAGE,
