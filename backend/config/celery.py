@@ -21,5 +21,11 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 
 # Auto-discover tasks from all installed apps
 # Celery will look for tasks.py files in all Django apps
-app.autodiscover_tasks()
+# Explicitly include plate girder submodule so the worker registers run_pso_optimization
+try:
+    from django.conf import settings
+    extra_modules = ["apps.modules.flexure_member.submodules.plate_girder"]
+    app.autodiscover_tasks(lambda: list(settings.INSTALLED_APPS) + extra_modules)
+except Exception:
+    app.autodiscover_tasks()
 
