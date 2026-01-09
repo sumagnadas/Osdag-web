@@ -30,6 +30,9 @@ export const InputSection = ({
   setExtraState = () => { },
   updateSelectedItems = () => { },
   setModalDynamicSrc,
+  isOptimized = () => { },
+  setOptimizedModal = () => { },
+  setModalValues = () => { },
 }) => {
   const safeInputs = inputs || {};
   const safeContextData = contextData || {};
@@ -435,13 +438,31 @@ export const InputSection = ({
               alt="Connection type"
               className="w-[100px] h-[100px] object-contain"
             /></div>}</>);
-
+      case 'optimized_number': // If the current input is optimized, shows a button or falls through to number input
+        if (isOptimized(safeInputs)) return (
+          <button
+            onClick={() => {
+              setOptimizedModal({
+                state: true,
+                key: field.key,
+              })
+              setModalValues({
+                lb: safeInputs[`${field.key}_lb`],
+                ub: safeInputs[`${field.key}_ub`],
+                inc: safeInputs[`${field.key}_inc`],
+              });
+            }
+            }
+            className="flex flex-1 items-center gap-x-2 bg-osdag-green text-white font-semibold px-4 py-2 rounded-lg shadow-md hover:bg-opacity-90 transition-opacity"
+          >
+            Set Bounds
+          </button >);
       case 'number':
       default:
         return (
           <div className="w-[60%]">
             <input
-              type={field.type === 'number' ? 'number' : 'text'}
+              type={(field.type === 'number' || field.type === 'optimized_number') ? 'number' : 'text'}
               value={safeInputs[field.key] ?? ""}
               onChange={(e) => setInputs({ ...safeInputs, [field.key]: e.target.value })}
               placeholder={field.placeholder || `ex. ${field.label}`}

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
 import { InputSection } from "./InputSection";
+import { Modal } from "antd";
 
 export const BaseInputDock = ({
   moduleConfig,
@@ -30,6 +31,11 @@ export const BaseInputDock = ({
   // Use external ref if provided, otherwise create internal one
   const internalLockBtnRef = useRef(null);
   const lockBtnRef = externalLockBtnRef || internalLockBtnRef;
+
+  // This contains all the data regarding the optimized modal, like if its open, 
+  // which key it bounds and also the values for setting the inputs
+  const [optimizedModal, setOptimizedModal] = useState({ state: false, key: '' });
+  const [modalValues, setModalValues] = useState({ lb: '', ub: '', inc: '' });
 
   return (
     <div className={`
@@ -118,6 +124,83 @@ export const BaseInputDock = ({
               </div>
             </div>
           )}
+
+          {/* Optimized Input Modal */}
+          <Modal
+            width={window.innerWidth < 768 ? '90%' : 420}
+            open={optimizedModal.state}
+            onCancel={() => {
+              setOptimizedModal({ state: false, key: '', });
+              setModalValues({ lb: 0, ub: 0, inc: 0 });
+            }
+            }
+            onOk={() => {
+              setInputs({
+                ...inputs,
+                [`${optimizedModal.key}_lb`]: parseFloat(modalValues.lb),
+                [`${optimizedModal.key}_ub`]: parseFloat(modalValues.ub),
+                [`${optimizedModal.key}_inc`]: parseFloat(modalValues.inc),
+              })
+              setOptimizedModal({ state: false, key: '', })
+              setModalValues({ lb: 0, ub: 0, inc: 0 });
+            }
+            }
+            centered
+            styles={{
+              body: {
+                textAlign: "center",
+                padding: "0px 0px !important",
+                boxSizing: "content-box",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+              },
+            }}
+          >
+            <div style={{ background: "transparent", fontWeight: "bold" }}>Optimized Input</div>
+            <div
+              className="gap-4"
+              style={{
+                backgroundColor: "white",
+                padding: "20px",
+                borderRadius: "8px",
+                width: "300px",
+                boxShadow: "0 0 10px rgba(0,0,0,0.25)",
+                display: 'grid',
+                width: '100%',
+              }}
+            >
+
+              <div className="grid grid-cols-3 w-full">
+                <div className="grid text-left content-center">Lower Bounds</div>
+                <input
+                  type="number"
+                  value={String(modalValues.lb)}
+                  onChange={(e) => { setModalValues((prev) => ({ ...prev, lb: e.target.value })); }}
+                  className="grid col-start-2 col-end-4 h-9 border border-gray-400 rounded-md px-3 text-sm focus:border-osdag-green focus:ring-2 focus:ring-osdag-green/20 outline-none"
+                />
+              </div>
+              <div className="grid  justify-between grid-cols-3">
+                <div className="grid text-left content-center">Upper Bounds</div>
+                <input
+                  type="number"
+                  value={String(modalValues.ub)}
+                  onChange={(e) => { setModalValues((prev) => ({ ...prev, ub: e.target.value })); }}
+                  className="grid col-start-2 col-end-4 h-9 border border-gray-400 rounded-md px-3 text-sm focus:border-osdag-green focus:ring-2 focus:ring-osdag-green/20 outline-none"
+
+                />
+              </div>
+              <div className="grid  justify-between grid-cols-3">
+                <div className="grid text-left content-center">Increment</div>
+                <input
+                  type="number"
+                  value={String(modalValues.inc)}
+                  onChange={(e) => { setModalValues((prev) => ({ ...prev, inc: e.target.value })); }}
+                  className="grid col-start-2 col-end-4 h-9 border border-gray-400 rounded-md px-3 text-sm focus:border-osdag-green focus:ring-2 focus:ring-osdag-green/20 outline-none"
+                />
+              </div>
+            </div>
+          </Modal>
         </div>
       </div>
 
@@ -179,6 +262,9 @@ export const BaseInputDock = ({
               setExtraState={setExtraState}
               updateSelectedItems={updateSelectedItems}
               setModalDynamicSrc={setModalDynamicSrc}
+              isOptimized={moduleConfig.isOptimized}
+              setOptimizedModal={setOptimizedModal}
+              setModalValues={setModalValues}
             />
           ))}
         </div>

@@ -237,7 +237,7 @@ export const plateGirderConfig = {
 
     return params;
   },
-
+  isOptimized: (inputs) => inputs.design_type === "Optimized",
   inputSections: [
     {
       title: "Basic Properties",
@@ -289,9 +289,9 @@ export const plateGirderConfig = {
         {
           key: "total_depth",
           label: "Total Depth (mm)*",
-          type: "number",
+          type: "optimized_number",
           validation: "positive_number",
-          placeholder: "Enter total depth"
+          placeholder: "Enter total depth",
         },
         {
           key: "web_thickness",
@@ -305,7 +305,7 @@ export const plateGirderConfig = {
         {
           key: "top_flange_width",
           label: "Top Flange Width (mm)*",
-          type: "number",
+          type: "optimized_number",
           validation: "positive_number",
           placeholder: "Enter top flange width"
         },
@@ -321,7 +321,7 @@ export const plateGirderConfig = {
         {
           key: "bottom_flange_width",
           label: "Bottom Flange Width (mm)*",
-          type: "number",
+          type: "optimized_number",
           validation: "positive_number",
           placeholder: "Enter bottom flange width"
         },
