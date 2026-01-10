@@ -323,7 +323,15 @@ export const InputSection = ({
             options={options}
             value={value}
             isSearchable={false}
-            onChange={(selected) => setInputs({ ...safeInputs, [field.key]: selected.value })}
+            onChange={(selected) => {
+              if (field.key === "design_type") { // For Optimized Inputs
+                setExtraState({
+                  ...extraState,
+                  optimizedInputs: selected.value === "Optimized",
+                });
+              }
+              setInputs({ ...safeInputs, [field.key]: selected.value })
+            }}
             menuPortalTarget={document.body}
             styles={customSelectStyles}
             classNamePrefix="react-select"

@@ -28,6 +28,7 @@ import { message, Modal as AntdModal } from 'antd';
 import { menuItems } from "../utils/moduleUtils";
 import { UI_STRINGS } from "../../../constants/UIStrings";
 import { isGuestUser } from "../../../utils/auth";
+import OptimizationGraph from "./OptimizationGraph";
 
 export const EngineeringModule = ({
   moduleConfig,
@@ -133,6 +134,7 @@ export const EngineeringModule = ({
   const [lockZoom, setLockZoom] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [showOptimizationGraph, setShowOptimizationGraph] = useState(false);
 
   // Normalize CAD path keys to handle case/spacing differences
   const normalizedCadModelPaths = useMemo(() => {
@@ -252,6 +254,12 @@ export const EngineeringModule = ({
     setSelectedCameraView(viewType);
   };
 
+  // Check if this design uses optimized inputs and open graph
+  const openOptiGraph = () => {
+    if (extraState.optimizedInputs)
+      setShowOptimizationGraph(!showOptimizationGraph);
+  }
+
   const handleSubmitEnhanced = async () => {
     setIsInputLocked(false);
     // If there's already an existing design, completely reset everything
@@ -275,6 +283,7 @@ export const EngineeringModule = ({
 
     // Call the actual submit function
     try {
+      openOptiGraph();
       await handleSubmit();
       setShowResetButton(true);
 
@@ -653,6 +662,7 @@ export const EngineeringModule = ({
               setCreateDesignReportBool={setCreateDesignReportBool}
               triggerScreenshotCapture={triggerScreenshotCapture}
               selectedOption={extraState.selectedOption}
+              openOptiGraph={openOptiGraph}
               setSelectedOption={(value) =>
                 setExtraState({ ...extraState, selectedOption: value })
               }
@@ -797,7 +807,7 @@ export const EngineeringModule = ({
         }, [])}
       </div>
 
-      <div className="relative flex flex-row h-full w-full">
+      <div className="relative flex flex-row h-full w-full" style={{ minHeight: 'calc(100vh - 80px)', maxHeight: 'calc(100vh - 48px)' }}> {/* Adjust for nav height */}
         {/* Input Dock Toggle Button - Fixed to left, shows when dock is closed (Desktop only) */}
         {!showInputDock && (
           <button
@@ -856,8 +866,8 @@ export const EngineeringModule = ({
           />
         )}
 
-        {/* Middle - 3D Model */}
-        <div className="flex-1 flex flex-col relative min-w-0">
+        {/* Middle - 3D Model/PSO Optimization Graph */}
+        {(<div className="flex-1 flex flex-col relative min-w-0">
           {/* Options Container - Show after design is complete. On desktop, show even when docks are open. On mobile, only show when docks are closed */}
           {showOptionsContainer && output && (window.innerWidth >= 768 || (!showInputDock && !showOutputDock)) && (
             <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-40 flex flex-wrap justify-center items-center gap-2 p-2 bg-white/90 dark:bg-osdag-dark-color/90 rounded-lg border border-gray-200 dark:border-gray-700 shadow-md">
@@ -937,23 +947,61 @@ export const EngineeringModule = ({
             </div>
           )}
 
-          <div className={`
+          {showOptimizationGraph ?
+            <OptimizationGraph data={{
+              non_fease: {
+                x: [],
+                y: [],
+                z: [],
+              },
+              fease: {
+                x: [],
+                y: [],
+                z: [],
+              },
+              best: {
+                x: [],
+                y: [],
+                z: []
+              }
+            }}
+              onClose={() => { setShowOptimizationGraph(false) }}
+            /> : showOptimizationGraph ?
+              <OptimizationGraph data={{
+                non_fease: {
+                  x: [1, 2, 3],
+                  y: [2, 6, 3],
+                  z: [5, 4, 3],
+                },
+                fease: {
+                  x: [1, 2, 3],
+                  y: [3, 5, 4],
+                  z: [4, 3, 2],
+                },
+                best: {
+                  x: [],
+                  y: [],
+                  z: []
+                }
+              }}
+                onClose={() => { setShowOptimizationGraph(false) }}
+              /> : <div className={`
             model-container
             ${showInputDock || showOutputDock ? 'hidden md:block' : ''}
-            ${showLogs 
-              ? (isLandscape ? 'hidden' : 'h-[70%] md:h-[60%]')
-              : 'h-full md:h-full'
-            }
+            ${showLogs
+                  ? (isLandscape ? 'hidden' : 'h-[70%] md:h-[60%]')
+                  : 'h-full md:h-full'
+                }
             ${!showLogs ? 'full-height' : ''}
           `}>
-            {loading || isRedesigning ? (
-              <div className="modelLoading">
-                <p>{isRedesigning ? "Updating Model..." : "Loading Model..."}</p>
-              </div>
-            ) : renderBoolean ? (
-              <div className="cadModel relative   bg-gradient-to-b from-[#FFFFFF] to-[#7E7E7E] dark:from-[#535353] dark:to-[#000000]">
-                {/* Existing background color picker - left side */}
-                {/* <div className="absolute top-2 left-2 flex items-center gap-2 bg-white/90 dark:bg-osdag-dark-color/90 px-3 py-1.5 rounded-lg shadow-md z-10">
+                {loading || isRedesigning ? (
+                  <div className="modelLoading">
+                    <p>{isRedesigning ? "Updating Model..." : "Loading Model..."}</p>
+                  </div>
+                ) : renderBoolean ? (
+                  <div className="cadModel relative   bg-gradient-to-b from-[#FFFFFF] to-[#7E7E7E] dark:from-[#535353] dark:to-[#000000]">
+                    {/* Existing background color picker - left side */}
+                    {/* <div className="absolute top-2 left-2 flex items-center gap-2 bg-white/90 dark:bg-osdag-dark-color/90 px-3 py-1.5 rounded-lg shadow-md z-10">
                   <label htmlFor="bgColorPicker" className="text-xs font-medium text-black dark:text-white mr-1">
                     Background:
                   </label>
@@ -967,80 +1015,80 @@ export const EngineeringModule = ({
                   />
                 </div> */}
 
-                {/* Grid selector - right side - Hide when docks are open on mobile */}
-                {(!showInputDock && !showOutputDock) && (
-                  <GridSelector onViewChange={handleOrthographicViewChange} />
-                )}
+                    {/* Grid selector - right side - Hide when docks are open on mobile */}
+                    {(!showInputDock && !showOutputDock) && (
+                      <GridSelector onViewChange={handleOrthographicViewChange} />
+                    )}
 
-                <Canvas
-                  gl={{ antialias: true, preserveDrawingBuffer: true, alpha: true }}
-                  style={{ width: "100%", height: "100%", background: 'transparent' }}
-                >
-                  <PerspectiveCamera
-                    ref={cameraRef}
-                    makeDefault
-                    position={cameraPos}
-                    fov={13}
-                    near={0.1}
-                    far={1000}
-                  />
-                  <Suspense
-                    fallback={
-                      <Html>
-                        <p>Loading 3D Model...</p>
-                      </Html>
-                    }
-                  >
-                    {renderBoolean && normalizedCadModelPaths && Object.keys(normalizedCadModelPaths).length > 0 && (() => {
-                      const activeViews = Array.isArray(selectedSection) ? selectedSection : [selectedSection];
-                      const primary = activeViews[0] || "Model";
-                      if (primary && primary !== "Model") {
-                        const hasPart =
-                          normalizedCadModelPaths[primary] ||
-                          normalizedCadModelPaths[primary?.toLowerCase?.()] ||
-                          normalizedCadModelPaths[primary?.toUpperCase?.()];
-                        if (!hasPart) {
-                          return (
-                            <Html>
-                              <p>{`No CAD part found for view "${primary}". Available parts: ${Object.keys(normalizedCadModelPaths).join(", ")}`}</p>
-                            </Html>
-                          );
+                    <Canvas
+                      gl={{ antialias: true, preserveDrawingBuffer: true, alpha: true }}
+                      style={{ width: "100%", height: "100%", background: 'transparent' }}
+                    >
+                      <PerspectiveCamera
+                        ref={cameraRef}
+                        makeDefault
+                        position={cameraPos}
+                        fov={13}
+                        near={0.1}
+                        far={1000}
+                      />
+                      <Suspense
+                        fallback={
+                          <Html>
+                            <p>Loading 3D Model...</p>
+                          </Html>
                         }
-                      }
-                      return null;
-                    })()}
-                    <Model
-                      modelPaths={normalizedCadModelPaths}
-                      selectedView={Array.isArray(selectedSection) ? selectedSection[0] : selectedSection}
-                      selectedViews={selectedSection}
-                      isMobile={window.innerWidth < 768}
-                      cameraSettings={{
-                        ...cameraSettings,
-                        connectivity: getConnectivity(), // Add connectivity info
-                      }}
-                      hoverDict={hoverDict}
-                      onHoverLabel={handleHoverLabel}
-                      onHoverEnd={handleHoverEnd}
-                      moduleCadConfig={moduleConfig?.cadConfig}
-                      key={`${modelKey}-${selectedSection}`}
-                    />
-                    <ScreenshotCapture
-                      screenshotTrigger={screenshotTrigger}
-                      setScreenshotTrigger={setScreenshotTrigger}
-                      selectedView={Array.isArray(selectedSection) ? selectedSection[0] : selectedSection}
-                    />
-                  </Suspense>
-                </Canvas>
-              </div>
-            ) : (
-              <div className="modelback"></div>
-            )}
-          </div>
+                      >
+                        {renderBoolean && normalizedCadModelPaths && Object.keys(normalizedCadModelPaths).length > 0 && (() => {
+                          const activeViews = Array.isArray(selectedSection) ? selectedSection : [selectedSection];
+                          const primary = activeViews[0] || "Model";
+                          if (primary && primary !== "Model") {
+                            const hasPart =
+                              normalizedCadModelPaths[primary] ||
+                              normalizedCadModelPaths[primary?.toLowerCase?.()] ||
+                              normalizedCadModelPaths[primary?.toUpperCase?.()];
+                            if (!hasPart) {
+                              return (
+                                <Html>
+                                  <p>{`No CAD part found for view "${primary}". Available parts: ${Object.keys(normalizedCadModelPaths).join(", ")}`}</p>
+                                </Html>
+                              );
+                            }
+                          }
+                          return null;
+                        })()}
+                        <Model
+                          modelPaths={normalizedCadModelPaths}
+                          selectedView={Array.isArray(selectedSection) ? selectedSection[0] : selectedSection}
+                          selectedViews={selectedSection}
+                          isMobile={window.innerWidth < 768}
+                          cameraSettings={{
+                            ...cameraSettings,
+                            connectivity: getConnectivity(), // Add connectivity info
+                          }}
+                          hoverDict={hoverDict}
+                          onHoverLabel={handleHoverLabel}
+                          onHoverEnd={handleHoverEnd}
+                          moduleCadConfig={moduleConfig?.cadConfig}
+                          key={`${modelKey}-${selectedSection}`}
+                        />
+                        <ScreenshotCapture
+                          screenshotTrigger={screenshotTrigger}
+                          setScreenshotTrigger={setScreenshotTrigger}
+                          selectedView={Array.isArray(selectedSection) ? selectedSection[0] : selectedSection}
+                        />
+                      </Suspense>
+                    </Canvas>
+                  </div>
+                ) : (
+                  <div className="modelback"></div>
+                )}
+              </div>}
 
           {showLogs && output && (window.innerWidth >= 768 || (!showInputDock && !showOutputDock)) && (
             <div className={`
               logs-container
-              ${isLandscape ? 'h-full' : 'h-[40%] md:h-[40%]'}
+              ${isLandscape ? 'h-full' : 'h-[20%] md:h-[20%]'}
               ${!showInputDock ? 'md:pl-0' : 'md:pl-[30px]'}
               ${!showOutputDock && output ? 'md:pr-0' : ''}
             `}>
@@ -1048,6 +1096,7 @@ export const EngineeringModule = ({
             </div>
           )}
         </div>
+        )}
 
         {/* Right - Output Dock - Only show if showOutputDock is true and output exists */}
         {showOutputDock && output && outputConfig && (

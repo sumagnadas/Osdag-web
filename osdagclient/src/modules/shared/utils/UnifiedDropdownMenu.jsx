@@ -93,6 +93,7 @@ function UnifiedDropdownMenu({
   thicknessList = [],
   angleList = [],
   topAngleList = [],
+  openOptiGraph = () => { }
 }) {
   const service = useEngineeringService();
   const { SaveInputValueFile } = useContext(UserContext);
@@ -422,6 +423,9 @@ function UnifiedDropdownMenu({
         break;
       case "Design Preferences":
         setDesignPrefModalStatus(true);
+        break;
+      case "Open Optimization Graph":
+        openOptiGraph();
         break;
       default:
         // Default value
