@@ -211,6 +211,11 @@ def run_pso_optimization(self, channel_name: str, input_data: Dict[str, Any]):
         # Extract bounds info (will be logged after module creation)
         logger.info("🔧 Creating PlateGirderWelded module...")
         module = create_module()
+        
+        module.bounds_map['bf_top'] = input_data.get('top_flange_width_bounds',(100, 1000, 10))
+        module.bounds_map['bf_bot'] = input_data.get('bottom_flange_width_bounds',(100, 1000, 10)) # width of bottom flange
+        module.bounds_map['D'] = input_data.get('total_depth_bounds',(200, 2000, 25)) # total depth
+        
         module.set_input_values(design_dict)
         
         # Log initial bounds (if available from module)

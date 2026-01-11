@@ -92,7 +92,7 @@ class PSOOptimizationConsumer(AsyncJsonWebsocketConsumer):
             # The task will send updates via Channel Layer
             try:
                 # Use sync_to_async to call the Celery task
-                task_result = await sync_to_async(run_pso_optimization.delay)(
+                task_result = run_pso_optimization.delay(
                     self.channel_name,
                     input_data
                 )

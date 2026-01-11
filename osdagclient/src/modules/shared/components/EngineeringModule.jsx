@@ -135,6 +135,28 @@ export const EngineeringModule = ({
   const [isDark, setIsDark] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [showOptimizationGraph, setShowOptimizationGraph] = useState(false);
+  const [optimizationDone, setOptimizationDone] = useState(false);
+  const [optimizationData, setOptimizationData] = useState({
+    current_iter: 0,
+    non_fease: {
+      x: [],
+      y: [],
+      z: [],
+    },
+    fease: {
+      x: [],
+      y: [],
+      z: [],
+    },
+    best: {
+      iter: null,
+      found: false,
+      particle: null,
+      x: [],
+      y: [],
+      z: []
+    }
+  });
 
   // Normalize CAD path keys to handle case/spacing differences
   const normalizedCadModelPaths = useMemo(() => {
@@ -283,7 +305,93 @@ export const EngineeringModule = ({
 
     // Call the actual submit function
     try {
-      openOptiGraph();
+      if (extraState.optimizedInputs) {
+        let sequence = -1; // to track and drop out-of-order messages.
+        setShowOptimizationGraph(true);
+        service.getRTUpdates("ws/optimize/plate-girder/",
+          (ev) => {
+            const ws = ev.target
+            ws.send(JSON.stringify({
+              type: "start_optimization",
+              data: inputs
+            }
+            ));
+
+            setOptimizationData({
+              current_iter: 0,
+              non_fease: {
+                x: [],
+                y: [],
+                z: [],
+              },
+              fease: {
+                x: [],
+                y: [],
+                z: [],
+              },
+              best: {
+                iter: null,
+                found: false,
+                particle: null,
+                x: [],
+                y: [],
+                z: []
+              }
+            });
+            setOptimizationDone(false);
+          },
+          (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.data.sequence > sequence) {
+              sequence = msg.data.sequence;
+              switch (msg.type) {
+                case "task_started":
+                  break;
+                case "pso_update":
+                  setOptimizationData((prev) => {
+                    if (msg.data.ur < 1) {
+                      return {
+                        ...prev,
+                        current_iter: msg.data.iteration,
+                        fease: {
+                          x: [...prev.fease.x, msg.data.ur],
+                          y: [...prev.fease.y, msg.data.depth],
+                          z: [...prev.fease.z, msg.data.weight_kg]
+                        }
+                      }
+                    }
+                    else {
+                      return {
+                        ...prev,
+                        current_iter: msg.data.iteration,
+                        non_fease: {
+                          x: [...prev.non_fease.x, msg.data.ur],
+                          y: [...prev.non_fease.y, msg.data.depth],
+                          z: [...prev.non_fease.z, msg.data.weight_kg]
+                        }
+                      }
+                    }
+
+                  })
+                  break;
+                case "pso_heartbeat":
+                  // update liveness indicator
+                  break;
+                case "pso_complete":
+                  setOptimizationDone(true);
+                  event.target.close(); // close the connection
+                  // show final design; stop loading
+                  break;
+                case "pso_error":
+                  console.lofg
+                  event.target.close(); // close the connection
+                  // show error; stop loading
+                  break;
+              }
+            }
+          }
+        )
+      }
       await handleSubmit();
       setShowResetButton(true);
 
@@ -948,60 +1056,27 @@ export const EngineeringModule = ({
           )}
 
           {showOptimizationGraph ?
-            <OptimizationGraph data={{
-              non_fease: {
-                x: [],
-                y: [],
-                z: [],
-              },
-              fease: {
-                x: [],
-                y: [],
-                z: [],
-              },
-              best: {
-                x: [],
-                y: [],
-                z: []
-              }
-            }}
+            <OptimizationGraph
+              data={optimizationData}
               onClose={() => { setShowOptimizationGraph(false) }}
-            /> : showOptimizationGraph ?
-              <OptimizationGraph data={{
-                non_fease: {
-                  x: [1, 2, 3],
-                  y: [2, 6, 3],
-                  z: [5, 4, 3],
-                },
-                fease: {
-                  x: [1, 2, 3],
-                  y: [3, 5, 4],
-                  z: [4, 3, 2],
-                },
-                best: {
-                  x: [],
-                  y: [],
-                  z: []
-                }
-              }}
-                onClose={() => { setShowOptimizationGraph(false) }}
-              /> : <div className={`
+              optimizationDone={optimizationDone}
+            /> : <div className={`
             model-container
             ${showInputDock || showOutputDock ? 'hidden md:block' : ''}
             ${showLogs
-                  ? (isLandscape ? 'hidden' : 'h-[70%] md:h-[60%]')
-                  : 'h-full md:h-full'
-                }
+                ? (isLandscape ? 'hidden' : 'h-[70%] md:h-[60%]')
+                : 'h-full md:h-full'
+              }
             ${!showLogs ? 'full-height' : ''}
           `}>
-                {loading || isRedesigning ? (
-                  <div className="modelLoading">
-                    <p>{isRedesigning ? "Updating Model..." : "Loading Model..."}</p>
-                  </div>
-                ) : renderBoolean ? (
-                  <div className="cadModel relative   bg-gradient-to-b from-[#FFFFFF] to-[#7E7E7E] dark:from-[#535353] dark:to-[#000000]">
-                    {/* Existing background color picker - left side */}
-                    {/* <div className="absolute top-2 left-2 flex items-center gap-2 bg-white/90 dark:bg-osdag-dark-color/90 px-3 py-1.5 rounded-lg shadow-md z-10">
+              {loading || isRedesigning ? (
+                <div className="modelLoading">
+                  <p>{isRedesigning ? "Updating Model..." : "Loading Model..."}</p>
+                </div>
+              ) : renderBoolean ? (
+                <div className="cadModel relative   bg-gradient-to-b from-[#FFFFFF] to-[#7E7E7E] dark:from-[#535353] dark:to-[#000000]">
+                  {/* Existing background color picker - left side */}
+                  {/* <div className="absolute top-2 left-2 flex items-center gap-2 bg-white/90 dark:bg-osdag-dark-color/90 px-3 py-1.5 rounded-lg shadow-md z-10">
                   <label htmlFor="bgColorPicker" className="text-xs font-medium text-black dark:text-white mr-1">
                     Background:
                   </label>
@@ -1015,75 +1090,75 @@ export const EngineeringModule = ({
                   />
                 </div> */}
 
-                    {/* Grid selector - right side - Hide when docks are open on mobile */}
-                    {(!showInputDock && !showOutputDock) && (
-                      <GridSelector onViewChange={handleOrthographicViewChange} />
-                    )}
+                  {/* Grid selector - right side - Hide when docks are open on mobile */}
+                  {(!showInputDock && !showOutputDock) && (
+                    <GridSelector onViewChange={handleOrthographicViewChange} />
+                  )}
 
-                    <Canvas
-                      gl={{ antialias: true, preserveDrawingBuffer: true, alpha: true }}
-                      style={{ width: "100%", height: "100%", background: 'transparent' }}
+                  <Canvas
+                    gl={{ antialias: true, preserveDrawingBuffer: true, alpha: true }}
+                    style={{ width: "100%", height: "100%", background: 'transparent' }}
+                  >
+                    <PerspectiveCamera
+                      ref={cameraRef}
+                      makeDefault
+                      position={cameraPos}
+                      fov={13}
+                      near={0.1}
+                      far={1000}
+                    />
+                    <Suspense
+                      fallback={
+                        <Html>
+                          <p>Loading 3D Model...</p>
+                        </Html>
+                      }
                     >
-                      <PerspectiveCamera
-                        ref={cameraRef}
-                        makeDefault
-                        position={cameraPos}
-                        fov={13}
-                        near={0.1}
-                        far={1000}
-                      />
-                      <Suspense
-                        fallback={
-                          <Html>
-                            <p>Loading 3D Model...</p>
-                          </Html>
-                        }
-                      >
-                        {renderBoolean && normalizedCadModelPaths && Object.keys(normalizedCadModelPaths).length > 0 && (() => {
-                          const activeViews = Array.isArray(selectedSection) ? selectedSection : [selectedSection];
-                          const primary = activeViews[0] || "Model";
-                          if (primary && primary !== "Model") {
-                            const hasPart =
-                              normalizedCadModelPaths[primary] ||
-                              normalizedCadModelPaths[primary?.toLowerCase?.()] ||
-                              normalizedCadModelPaths[primary?.toUpperCase?.()];
-                            if (!hasPart) {
-                              return (
-                                <Html>
-                                  <p>{`No CAD part found for view "${primary}". Available parts: ${Object.keys(normalizedCadModelPaths).join(", ")}`}</p>
-                                </Html>
-                              );
-                            }
+                      {renderBoolean && normalizedCadModelPaths && Object.keys(normalizedCadModelPaths).length > 0 && (() => {
+                        const activeViews = Array.isArray(selectedSection) ? selectedSection : [selectedSection];
+                        const primary = activeViews[0] || "Model";
+                        if (primary && primary !== "Model") {
+                          const hasPart =
+                            normalizedCadModelPaths[primary] ||
+                            normalizedCadModelPaths[primary?.toLowerCase?.()] ||
+                            normalizedCadModelPaths[primary?.toUpperCase?.()];
+                          if (!hasPart) {
+                            return (
+                              <Html>
+                                <p>{`No CAD part found for view "${primary}". Available parts: ${Object.keys(normalizedCadModelPaths).join(", ")}`}</p>
+                              </Html>
+                            );
                           }
-                          return null;
-                        })()}
-                        <Model
-                          modelPaths={normalizedCadModelPaths}
-                          selectedView={Array.isArray(selectedSection) ? selectedSection[0] : selectedSection}
-                          selectedViews={selectedSection}
-                          isMobile={window.innerWidth < 768}
-                          cameraSettings={{
-                            ...cameraSettings,
-                            connectivity: getConnectivity(), // Add connectivity info
-                          }}
-                          hoverDict={hoverDict}
-                          onHoverLabel={handleHoverLabel}
-                          onHoverEnd={handleHoverEnd}
-                          moduleCadConfig={moduleConfig?.cadConfig}
-                          key={`${modelKey}-${selectedSection}`}
-                        />
-                        <ScreenshotCapture
-                          screenshotTrigger={screenshotTrigger}
-                          setScreenshotTrigger={setScreenshotTrigger}
-                          selectedView={Array.isArray(selectedSection) ? selectedSection[0] : selectedSection}
-                        />
-                      </Suspense>
-                    </Canvas>
-                  </div>
-                ) : (
-                  <div className="modelback"></div>
-                )}
-              </div>}
+                        }
+                        return null;
+                      })()}
+                      <Model
+                        modelPaths={normalizedCadModelPaths}
+                        selectedView={Array.isArray(selectedSection) ? selectedSection[0] : selectedSection}
+                        selectedViews={selectedSection}
+                        isMobile={window.innerWidth < 768}
+                        cameraSettings={{
+                          ...cameraSettings,
+                          connectivity: getConnectivity(), // Add connectivity info
+                        }}
+                        hoverDict={hoverDict}
+                        onHoverLabel={handleHoverLabel}
+                        onHoverEnd={handleHoverEnd}
+                        moduleCadConfig={moduleConfig?.cadConfig}
+                        key={`${modelKey}-${selectedSection}`}
+                      />
+                      <ScreenshotCapture
+                        screenshotTrigger={screenshotTrigger}
+                        setScreenshotTrigger={setScreenshotTrigger}
+                        selectedView={Array.isArray(selectedSection) ? selectedSection[0] : selectedSection}
+                      />
+                    </Suspense>
+                  </Canvas>
+                </div>
+              ) : (
+                <div className="modelback"></div>
+              )}
+            </div>}
 
           {showLogs && output && (window.innerWidth >= 768 || (!showInputDock && !showOutputDock)) && (
             <div className={`

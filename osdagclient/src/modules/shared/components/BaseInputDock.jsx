@@ -137,9 +137,7 @@ export const BaseInputDock = ({
             onOk={() => {
               setInputs({
                 ...inputs,
-                [`${optimizedModal.key}_lb`]: parseFloat(modalValues.lb),
-                [`${optimizedModal.key}_ub`]: parseFloat(modalValues.ub),
-                [`${optimizedModal.key}_inc`]: parseFloat(modalValues.inc),
+                [`${optimizedModal.key}_bounds`]: [parseFloat(modalValues.lb), parseFloat(modalValues.ub), parseFloat(modalValues.inc)],
               })
               setOptimizedModal({ state: false, key: '', })
               setModalValues({ lb: 0, ub: 0, inc: 0 });

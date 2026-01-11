@@ -470,6 +470,24 @@ export const useEngineeringService = () => {
   }, [apiCall]);
 
   // ===================================================================
+  // 8. WEBSOCKET - Websocket Connection for real-time updates
+  // ===================================================================
+
+  const getRTUpdates = useCallback((ws_url, onOpen = () => { }, onMessage = () => { }, onError = () => { }, onClose = () => { }) => {
+    const backend_url = new URL(BASE_URL);
+    try {
+      const socket = new WebSocket("ws://" + backend_url.host + "/" + ws_url);
+      socket.onopen = onOpen;
+      socket.onmessage = onMessage;
+      socket.onerror =  onError;
+      socket.onclose = onClose;
+    }
+    catch (error) {
+      console.log(error);
+    }
+  }, [])
+
+  // ===================================================================
   // RETURN API
   // ===================================================================
 
@@ -500,6 +518,9 @@ export const useEngineeringService = () => {
     addCustomMaterial,
     getDesignPreferences,
     uploadCompanyLogo,
+
+    // WebSocket
+    getRTUpdates: getRTUpdates,
 
     // CSV
     exportToCSV: exportToCSVUtil,
